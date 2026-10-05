@@ -5,15 +5,16 @@ import {
     StyleSheet,
     FlatList,
     TextInput,
-    TouchableOpacity,
+    Pressable,
     KeyboardAvoidingView,
     Platform,
-    ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Avatar } from '../../components/ui';
-import { COLORS, SPACING, RADIUS } from '../../constants/config';
+import { Avatar, IconButton, Icon, Sheet } from '../../components/ui';
+import { ChatSkeleton } from '../../components/ui/Skeleton';
+import { PandaSpinner } from '../../components/brand/SleepingPanda';
+import { COLORS, SPACING, RADIUS, TYPE } from '../../constants/config';
 import api from '../../services/api';
 
 export default function ChatScreen() {
@@ -25,6 +26,7 @@ export default function ChatScreen() {
     const [loading, setLoading] = useState(true);
     const [sending, setSending] = useState(false);
     const [user, setUser] = useState(null);
+    const [errand, setErrand] = useState(null);
 
     useEffect(() => {
         fetchData();
@@ -35,12 +37,14 @@ export default function ChatScreen() {
 
     const fetchData = async () => {
         try {
-            const [messagesData, userData] = await Promise.all([
+            const [messagesData, userData, errandData] = await Promise.all([
                 api.getMessages(errandId),
                 api.getMe(),
+                api.getErrand(errandId),
             ]);
             setMessages(messagesData.messages || []);
             setUser(userData.user);
+            setErrand(errandData.errand);
         } catch (error) {
             console.error('Failed to fetch chat:', error);
         } finally {
@@ -65,50 +69,38 @@ export default function ChatScreen() {
             const { message } = await api.sendMessage(errandId, newMessage.trim());
             setMessages((prev) => [...prev, message]);
             setNewMessage('');
-
-            // Scroll to bottom
-            setTimeout(() => {
-                flatListRef.current?.scrollToEnd({ animated: true });
-            }, 100);
+            setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
         } catch (error) {
-            console.error('Failed to send message:', error);
+            if (error.code === 'CHAT_CLOSED') {
+                setErrand((e) => (e ? { ...e, status: 'RELEASED' } : e));
+                Sheet.alert('Chat is closed', error.message);
+            } else {
+                console.error('Failed to send message:', error);
+            }
         } finally {
             setSending(false);
         }
     };
 
-    const formatTime = (dateString) => {
-        const date = new Date(dateString);
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    };
+    const formatTime = (dateString) =>
+        new Date(dateString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     const renderMessage = ({ item }) => {
-        const isOwnMessage = item.senderId === user?.id;
+        const own = item.senderId === user?.id;
 
         return (
-            <View style={[styles.messageRow, isOwnMessage && styles.ownMessageRow]}>
-                {!isOwnMessage && (
+            <View style={[styles.messageRow, own && styles.ownRow]}>
+                {!own ? (
                     <Avatar
                         source={item.sender?.avatarUrl ? { uri: item.sender.avatarUrl } : null}
                         name={item.sender?.name}
                         size={32}
                     />
-                )}
-                <View
-                    style={[
-                        styles.messageBubble,
-                        isOwnMessage ? styles.ownBubble : styles.otherBubble,
-                    ]}
-                >
-                    {!isOwnMessage && (
-                        <Text style={styles.senderName}>{item.sender?.name}</Text>
-                    )}
-                    <Text style={[styles.messageText, isOwnMessage && styles.ownMessageText]}>
-                        {item.content}
-                    </Text>
-                    <Text style={[styles.messageTime, isOwnMessage && styles.ownMessageTime]}>
-                        {formatTime(item.createdAt)}
-                    </Text>
+                ) : null}
+                <View style={[styles.bubble, own ? styles.ownBubble : styles.otherBubble]}>
+                    {!own ? <Text style={styles.senderName}>{item.sender?.name}</Text> : null}
+                    <Text style={[styles.messageText, own && { color: COLORS.white }]}>{item.content}</Text>
+                    <Text style={[styles.time, own && { color: COLORS.surfacePressed }]}>{formatTime(item.createdAt)}</Text>
                 </View>
             </View>
         );
@@ -116,222 +108,166 @@ export default function ChatScreen() {
 
     if (loading) {
         return (
-            <SafeAreaView style={styles.container}>
-                <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color={COLORS.primary} />
+            <SafeAreaView style={styles.container} edges={['top']}>
+                <View style={styles.header}>
+                    <IconButton icon="ChevronLeft" label="Back" onPress={() => router.back()} />
+                    <View style={styles.headerInfo} />
+                    <View style={{ width: 48 }} />
                 </View>
+                <ChatSkeleton />
             </SafeAreaView>
         );
     }
 
+    const canSend = newMessage.trim() && !sending;
+
+    // Chat is only open while the errand is in progress (until the requester pays)
+    const chatOpen = !errand || ['ACTIVE', 'COMPLETED'].includes(errand.status);
+    const partner = errand ? (errand.requesterId === user?.id ? errand.runner : errand.requester) : null;
+
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
-            {/* Header */}
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()}>
-                    <Text style={styles.backButton}>←</Text>
-                </TouchableOpacity>
+                <IconButton icon="ChevronLeft" label="Back" onPress={() => router.back()} />
                 <View style={styles.headerInfo}>
-                    <Text style={styles.headerTitle}>Chat</Text>
-                    <Text style={styles.headerSubtitle}>
-                        {messages.length} messages
+                    <Text style={styles.headerTitle} numberOfLines={1}>{partner?.name || 'Chat'}</Text>
+                    <Text style={styles.headerSub} numberOfLines={1}>
+                        {errand ? errand.title : `${messages.length} messages`}
                     </Text>
                 </View>
-                <View style={{ width: 28 }} />
+                <View style={{ width: 48 }} />
             </View>
 
-            {/* Messages */}
             <FlatList
                 ref={flatListRef}
                 data={messages}
                 keyExtractor={(item) => item.id}
                 renderItem={renderMessage}
-                contentContainerStyle={styles.messagesList}
-                onContentSizeChange={() => {
-                    flatListRef.current?.scrollToEnd({ animated: false });
-                }}
+                contentContainerStyle={styles.list}
+                onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
                 ListEmptyComponent={
-                    <View style={styles.emptyContainer}>
-                        <Text style={styles.emptyEmoji}>💬</Text>
-                        <Text style={styles.emptyText}>No messages yet</Text>
-                        <Text style={styles.emptySubtext}>
-                            Start the conversation!
-                        </Text>
+                    <View style={styles.empty}>
+                        <View style={styles.emptyDisc}>
+                            <Icon name="MessageCircle" size={28} />
+                        </View>
+                        <Text style={styles.emptyTitle}>Say hello</Text>
+                        <Text style={styles.emptyText}>Sort out the details of this errand here.</Text>
                     </View>
                 }
             />
 
-            {/* Input */}
             <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                 keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
             >
-                <View style={styles.inputContainer}>
+                {chatOpen ? (
+                <View style={styles.inputBar}>
                     <TextInput
                         style={styles.input}
-                        placeholder="Type a message..."
-                        placeholderTextColor={COLORS.textMuted}
+                        placeholder="Write a message"
+                        placeholderTextColor={COLORS.grey}
                         value={newMessage}
                         onChangeText={setNewMessage}
                         multiline
                         maxLength={500}
+                        selectionColor={COLORS.ink}
                     />
-                    <TouchableOpacity
-                        style={[
-                            styles.sendButton,
-                            (!newMessage.trim() || sending) && styles.sendButtonDisabled,
-                        ]}
+                    <Pressable
+                        style={[styles.send, !canSend && styles.sendOff]}
                         onPress={handleSend}
-                        disabled={!newMessage.trim() || sending}
+                        disabled={!canSend}
+                        accessibilityLabel="Send message"
                     >
                         {sending ? (
-                            <ActivityIndicator size="small" color={COLORS.white} />
+                            <PandaSpinner size={34} />
                         ) : (
-                            <Text style={styles.sendIcon}>↑</Text>
+                            <Icon name="Send" size={20} color={canSend ? COLORS.white : COLORS.grey} />
                         )}
-                    </TouchableOpacity>
+                    </Pressable>
                 </View>
+                ) : (
+                    <View style={styles.closed}>
+                        <Icon name="Lock" size={18} color={COLORS.inkSecondary} />
+                        <Text style={styles.closedText}>
+                            This chat is closed. It is only open while the errand is in progress.
+                        </Text>
+                    </View>
+                )}
             </KeyboardAvoidingView>
         </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: COLORS.bgDark,
-    },
-    loadingContainer: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
+    container: { flex: 1, backgroundColor: COLORS.surface },
+    center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: SPACING.md,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.sm,
         borderBottomWidth: 1,
-        borderBottomColor: COLORS.bgElevated,
+        borderBottomColor: COLORS.line,
     },
-    backButton: {
-        color: COLORS.textPrimary,
-        fontSize: 28,
-        fontWeight: '300',
-    },
-    headerInfo: {
-        flex: 1,
-        alignItems: 'center',
-    },
-    headerTitle: {
-        color: COLORS.textPrimary,
-        fontSize: 16,
-        fontWeight: '700',
-    },
-    headerSubtitle: {
-        color: COLORS.textMuted,
-        fontSize: 12,
-    },
-    messagesList: {
-        padding: SPACING.md,
-        flexGrow: 1,
-    },
-    messageRow: {
-        flexDirection: 'row',
-        marginBottom: SPACING.md,
-        alignItems: 'flex-end',
-        gap: SPACING.sm,
-    },
-    ownMessageRow: {
-        justifyContent: 'flex-end',
-    },
-    messageBubble: {
-        maxWidth: '75%',
-        padding: SPACING.md,
-        borderRadius: RADIUS.lg,
-    },
-    otherBubble: {
-        backgroundColor: COLORS.bgCard,
-        borderBottomLeftRadius: SPACING.xs,
-    },
-    ownBubble: {
-        backgroundColor: COLORS.primary,
-        borderBottomRightRadius: SPACING.xs,
-    },
-    senderName: {
-        color: COLORS.primary,
-        fontSize: 12,
-        fontWeight: '600',
-        marginBottom: SPACING.xs,
-    },
-    messageText: {
-        color: COLORS.textPrimary,
-        fontSize: 15,
-        lineHeight: 20,
-    },
-    ownMessageText: {
-        color: COLORS.white,
-    },
-    messageTime: {
-        color: COLORS.textMuted,
-        fontSize: 10,
-        marginTop: SPACING.xs,
-        alignSelf: 'flex-end',
-    },
-    ownMessageTime: {
-        color: 'rgba(255, 255, 255, 0.7)',
-    },
-    emptyContainer: {
-        flex: 1,
+    headerInfo: { flex: 1, alignItems: 'center' },
+    headerTitle: { ...TYPE.cardTitle, color: COLORS.ink },
+    headerSub: { ...TYPE.caption, color: COLORS.inkSecondary },
+    list: { padding: SPACING.md, flexGrow: 1 },
+    messageRow: { flexDirection: 'row', alignItems: 'flex-end', gap: SPACING.sm, marginBottom: SPACING.md },
+    ownRow: { justifyContent: 'flex-end' },
+    bubble: { maxWidth: '75%', paddingVertical: 10, paddingHorizontal: 14, borderRadius: RADIUS.card },
+    otherBubble: { backgroundColor: COLORS.surfaceMuted, borderBottomLeftRadius: 6 },
+    ownBubble: { backgroundColor: COLORS.ink, borderBottomRightRadius: 6 },
+    senderName: { ...TYPE.badge, color: COLORS.inkSecondary, marginBottom: 2 },
+    messageText: { ...TYPE.body, fontSize: 15, lineHeight: 21, color: COLORS.ink },
+    time: { ...TYPE.caption, fontSize: 10, color: COLORS.inkSecondary, alignSelf: 'flex-end', marginTop: 4 },
+    empty: { alignItems: 'center', paddingTop: SPACING.xxl * 2, gap: 6 },
+    emptyDisc: {
+        width: 64,
+        height: 64,
+        borderRadius: RADIUS.full,
+        backgroundColor: COLORS.surfaceMuted,
         alignItems: 'center',
         justifyContent: 'center',
-        paddingTop: SPACING.xxl * 2,
+        marginBottom: SPACING.sm,
     },
-    emptyEmoji: {
-        fontSize: 48,
-        marginBottom: SPACING.md,
+    emptyTitle: { ...TYPE.heading, color: COLORS.ink },
+    emptyText: { ...TYPE.bodySm, color: COLORS.inkSecondary },
+    closed: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        margin: SPACING.md,
+        padding: SPACING.md,
+        backgroundColor: COLORS.surfaceMuted,
+        borderRadius: RADIUS.card,
     },
-    emptyText: {
-        color: COLORS.textPrimary,
-        fontSize: 18,
-        fontWeight: '600',
-    },
-    emptySubtext: {
-        color: COLORS.textSecondary,
-        fontSize: 14,
-        marginTop: SPACING.xs,
-    },
-    inputContainer: {
+    closedText: { ...TYPE.bodySm, color: COLORS.inkSecondary, flex: 1 },
+    inputBar: {
         flexDirection: 'row',
         alignItems: 'flex-end',
+        gap: SPACING.sm,
         padding: SPACING.md,
         borderTopWidth: 1,
-        borderTopColor: COLORS.bgElevated,
-        gap: SPACING.sm,
+        borderTopColor: COLORS.line,
     },
     input: {
         flex: 1,
-        backgroundColor: COLORS.bgCard,
-        borderRadius: RADIUS.lg,
+        ...TYPE.body,
+        color: COLORS.ink,
+        backgroundColor: COLORS.surfaceMuted,
+        borderRadius: RADIUS.card,
         paddingHorizontal: SPACING.md,
-        paddingVertical: SPACING.sm,
-        color: COLORS.textPrimary,
-        fontSize: 15,
+        paddingVertical: 10,
         maxHeight: 100,
     },
-    sendButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: COLORS.primary,
+    send: {
+        width: 48,
+        height: 48,
+        borderRadius: RADIUS.full,
+        backgroundColor: COLORS.ink,
         alignItems: 'center',
         justifyContent: 'center',
     },
-    sendButtonDisabled: {
-        backgroundColor: COLORS.bgElevated,
-    },
-    sendIcon: {
-        color: COLORS.white,
-        fontSize: 20,
-        fontWeight: '700',
-    },
+    sendOff: { backgroundColor: COLORS.surfaceMuted },
 });

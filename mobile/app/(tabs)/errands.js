@@ -5,21 +5,32 @@ import {
     StyleSheet,
     FlatList,
     RefreshControl,
-    TouchableOpacity,
-    ActivityIndicator,
+    Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ErrandCard } from '../../components/errand/ErrandCard';
-import { COLORS, SPACING, RADIUS } from '../../constants/config';
+import { Button, Icon } from '../../components/ui';
+import { ErrandListSkeleton } from '../../components/ui/Skeleton';
+import { COLORS, SPACING, RADIUS, TYPE } from '../../constants/config';
 import api from '../../services/api';
+
+const TABS = [
+    { key: 'lazy', label: 'Sent', icon: 'Send' },
+    { key: 'runner', label: 'Running', icon: 'Footprints' },
+];
 
 export default function ErrandsScreen() {
     const router = useRouter();
     const [errands, setErrands] = useState([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
-    const [activeTab, setActiveTab] = useState('lazy'); // 'lazy' or 'runner'
+    const [activeTab, setActiveTab] = useState('lazy');
+    const [me, setMe] = useState(null);
+
+    useEffect(() => {
+        api.getStoredUser().then(setMe).catch(() => {});
+    }, []);
 
     const fetchErrands = async () => {
         try {
@@ -43,69 +54,69 @@ export default function ErrandsScreen() {
         fetchErrands();
     }, [activeTab]);
 
-    const handleErrandPress = (errand) => {
-        router.push(`/errand/${errand.id}`);
-    };
+    const sent = activeTab === 'lazy';
 
-    const TabSelector = () => (
-        <View style={styles.tabContainer}>
-            <TouchableOpacity
-                style={[styles.tab, activeTab === 'lazy' && styles.tabActive]}
-                onPress={() => setActiveTab('lazy')}
-            >
-                <Text style={styles.tabEmoji}>😴</Text>
-                <Text style={[styles.tabText, activeTab === 'lazy' && styles.tabTextActive]}>
-                    My Requests
-                </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-                style={[styles.tab, activeTab === 'runner' && styles.tabActive]}
-                onPress={() => setActiveTab('runner')}
-            >
-                <Text style={styles.tabEmoji}>🏃</Text>
-                <Text style={[styles.tabText, activeTab === 'runner' && styles.tabTextActive]}>
-                    Running
-                </Text>
-            </TouchableOpacity>
+    const EmptyState = () => (
+        <View style={styles.empty}>
+            <View style={styles.emptyDisc}>
+                <Icon name={sent ? 'Send' : 'Footprints'} size={28} />
+            </View>
+            <Text style={styles.emptyTitle}>{sent ? 'Nothing sent yet' : 'No errands running'}</Text>
+            <Text style={styles.emptyText}>
+                {sent
+                    ? 'Got something you would rather not do? Your neighbours will.'
+                    : 'Errands you pick up will show up here, step by step.'}
+            </Text>
         </View>
     );
 
-    const EmptyState = () => (
-        <View style={styles.emptyContainer}>
-            <Text style={styles.emptyEmoji}>
-                {activeTab === 'lazy' ? '📝' : '🔍'}
-            </Text>
-            <Text style={styles.emptyTitle}>
-                {activeTab === 'lazy' ? 'No requests yet' : 'No tasks accepted'}
-            </Text>
-            <Text style={styles.emptySubtitle}>
-                {activeTab === 'lazy'
-                    ? 'Post an errand and get help from your neighbours!'
-                    : 'Check the radar to find nearby tasks to run!'}
-            </Text>
-            <TouchableOpacity
-                style={styles.emptyButton}
-                onPress={() => router.push(activeTab === 'lazy' ? '/post' : '/(tabs)/radar')}
-            >
-                <Text style={styles.emptyButtonText}>
-                    {activeTab === 'lazy' ? 'Post an Errand' : 'Find Tasks'}
+    // Big, obvious call to action at the top of whichever tab you are on
+    const StartCta = (
+        <View style={styles.cta}>
+            <View style={styles.ctaCopy}>
+                <Text style={styles.ctaTitle}>{sent ? 'Need a hand?' : 'Ready to earn?'}</Text>
+                <Text style={styles.ctaText}>
+                    {sent
+                        ? 'Post an errand and a neighbour will pick it up.'
+                        : 'See errands near you and pick one up.'}
                 </Text>
-            </TouchableOpacity>
+            </View>
+            <Button
+                title={sent ? 'Send an errand' : 'Start running'}
+                variant="primary"
+                block
+                bubbleIcon={sent ? 'Plus' : 'Footprints'}
+                onPress={() => router.push(sent ? '/post' : '/(tabs)/radar')}
+            />
         </View>
     );
 
     return (
-        <SafeAreaView style={styles.container}>
+        <SafeAreaView style={styles.container} edges={['top']}>
             <View style={styles.header}>
-                <Text style={styles.title}>My Errands</Text>
-                <Text style={styles.subtitle}>Track your requests and tasks</Text>
+                <Text style={styles.title}>My errands</Text>
             </View>
 
-            <TabSelector />
+            <View style={styles.tabs}>
+                {TABS.map((tab) => {
+                    const on = activeTab === tab.key;
+                    return (
+                        <Pressable
+                            key={tab.key}
+                            style={[styles.tab, on && styles.tabOn]}
+                            onPress={() => setActiveTab(tab.key)}
+                        >
+                            <Icon name={tab.icon} size={18} color={on ? COLORS.white : COLORS.ink} />
+                            <Text style={[styles.tabText, on && { color: COLORS.white }]}>{tab.label}</Text>
+                        </Pressable>
+                    );
+                })}
+            </View>
 
             {loading ? (
-                <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color={COLORS.primary} />
+                <View style={styles.list}>
+                    {StartCta}
+                    <ErrandListSkeleton count={3} variant="tracking" />
                 </View>
             ) : (
                 <FlatList
@@ -114,19 +125,16 @@ export default function ErrandsScreen() {
                     renderItem={({ item }) => (
                         <ErrandCard
                             errand={item}
-                            onPress={handleErrandPress}
-                            variant="compact"
+                            onPress={(e) => router.push(`/errand/${e.id}`)}
+                            onChat={(e) => router.push(`/chat/${e.id}`)}
+                            currentUserId={me?.id}
+                            variant="tracking"
                         />
                     )}
-                    contentContainerStyle={styles.listContent}
+                    ListHeaderComponent={StartCta}
+                    contentContainerStyle={styles.list}
                     showsVerticalScrollIndicator={false}
-                    refreshControl={
-                        <RefreshControl
-                            refreshing={refreshing}
-                            onRefresh={onRefresh}
-                            tintColor={COLORS.primary}
-                        />
-                    }
+                    refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.ink} />}
                     ListEmptyComponent={<EmptyState />}
                 />
             )}
@@ -135,96 +143,54 @@ export default function ErrandsScreen() {
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: COLORS.bgDark,
-    },
-    header: {
-        paddingHorizontal: SPACING.lg,
-        paddingVertical: SPACING.md,
-    },
-    title: {
-        color: COLORS.textPrimary,
-        fontSize: 28,
-        fontWeight: '800',
-    },
-    subtitle: {
-        color: COLORS.textSecondary,
-        fontSize: 14,
-        marginTop: 2,
-    },
-    tabContainer: {
+    container: { flex: 1, backgroundColor: COLORS.surface },
+    header: { paddingHorizontal: SPACING.lg, paddingTop: SPACING.md, paddingBottom: SPACING.sm },
+    title: { ...TYPE.title, color: COLORS.ink },
+    tabs: {
         flexDirection: 'row',
+        gap: SPACING.sm,
         marginHorizontal: SPACING.lg,
         marginBottom: SPACING.md,
-        backgroundColor: COLORS.bgCard,
-        borderRadius: RADIUS.lg,
-        padding: SPACING.xs,
     },
     tab: {
         flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: SPACING.md,
-        borderRadius: RADIUS.md,
-        gap: SPACING.sm,
+        gap: 8,
+        paddingVertical: 12,
+        borderRadius: RADIUS.full,
+        backgroundColor: COLORS.surfaceMuted,
     },
-    tabActive: {
-        backgroundColor: COLORS.primary,
-    },
-    tabEmoji: {
-        fontSize: 18,
-    },
-    tabText: {
-        color: COLORS.textSecondary,
-        fontSize: 14,
-        fontWeight: '600',
-    },
-    tabTextActive: {
-        color: COLORS.white,
-    },
-    loadingContainer: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    listContent: {
-        padding: SPACING.lg,
-        paddingTop: 0,
-        flexGrow: 1,
-    },
-    emptyContainer: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: SPACING.xxl,
-    },
-    emptyEmoji: {
-        fontSize: 64,
-        marginBottom: SPACING.md,
-    },
-    emptyTitle: {
-        color: COLORS.textPrimary,
-        fontSize: 20,
-        fontWeight: '700',
-        marginBottom: SPACING.xs,
-    },
-    emptySubtitle: {
-        color: COLORS.textSecondary,
-        fontSize: 14,
-        textAlign: 'center',
+    tabOn: { backgroundColor: COLORS.ink },
+    tabText: { ...TYPE.button, fontSize: 14, color: COLORS.ink },
+    center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+    cta: {
+        backgroundColor: COLORS.surfaceMuted,
+        borderRadius: RADIUS.card,
+        padding: SPACING.md,
+        gap: SPACING.md,
         marginBottom: SPACING.lg,
-        paddingHorizontal: SPACING.xl,
     },
-    emptyButton: {
-        backgroundColor: COLORS.primary,
-        paddingVertical: SPACING.md,
-        paddingHorizontal: SPACING.xl,
-        borderRadius: RADIUS.lg,
+    ctaCopy: { gap: 2, paddingHorizontal: 4, paddingTop: 4 },
+    ctaTitle: { ...TYPE.title, color: COLORS.ink },
+    ctaText: { ...TYPE.bodySm, color: COLORS.inkSecondary },
+    list: { paddingHorizontal: SPACING.lg, paddingBottom: SPACING.xl, flexGrow: 1 },
+    empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: SPACING.xxl, gap: 6 },
+    emptyDisc: {
+        width: 72,
+        height: 72,
+        borderRadius: RADIUS.full,
+        backgroundColor: COLORS.surfaceMuted,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: SPACING.sm,
     },
-    emptyButtonText: {
-        color: COLORS.white,
-        fontWeight: '600',
+    emptyTitle: { ...TYPE.heading, color: COLORS.ink },
+    emptyText: {
+        ...TYPE.bodySm,
+        color: COLORS.inkSecondary,
+        textAlign: 'center',
+        paddingHorizontal: SPACING.xl,
     },
 });

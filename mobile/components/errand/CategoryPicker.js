@@ -1,15 +1,11 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { COLORS, CATEGORIES, SPACING, RADIUS } from '../../constants/config';
+import { Icon } from '../ui/Icon';
+import { COLORS, CATEGORIES, SPACING, RADIUS, TYPE } from '../../constants/config';
 
-export const CategoryPicker = ({
-    selected,
-    onSelect,
-    style,
-}) => {
-    const categories = Object.entries(CATEGORIES);
-
+// Four-up grid of category tiles. Selected: the tile turns black, tilts -2 degrees.
+export const CategoryPicker = ({ selected, onSelect, title = 'What kind of errand?', style }) => {
     const handleSelect = (key) => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         onSelect(key);
@@ -17,73 +13,61 @@ export const CategoryPicker = ({
 
     return (
         <View style={[styles.container, style]}>
-            <Text style={styles.label}>Category</Text>
-            <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.scrollContent}
-            >
-                {categories.map(([key, category]) => {
-                    const isSelected = selected === key;
+            {title ? <Text style={styles.title}>{title}</Text> : null}
+            <View style={styles.grid}>
+                {Object.entries(CATEGORIES).map(([key, category]) => {
+                    const on = selected === key;
                     return (
-                        <TouchableOpacity
+                        <Pressable
                             key={key}
                             onPress={() => handleSelect(key)}
-                            activeOpacity={0.7}
-                            style={[
-                                styles.categoryItem,
-                                isSelected && { backgroundColor: `${category.color}20`, borderColor: category.color },
-                            ]}
+                            accessibilityState={{ selected: on }}
+                            style={[styles.tile, on && styles.tileOn]}
                         >
-                            <Text style={styles.icon}>{category.icon}</Text>
-                            <Text
-                                style={[
-                                    styles.categoryLabel,
-                                    isSelected && { color: category.color },
-                                ]}
-                            >
+                            <View style={[styles.disc, on && { backgroundColor: COLORS.white }]}>
+                                <Icon name={category.icon} size={24} color={COLORS.ink} />
+                            </View>
+                            <Text style={[styles.label, on && { color: COLORS.white }]} numberOfLines={2}>
                                 {category.label}
                             </Text>
-                        </TouchableOpacity>
+                        </Pressable>
                     );
                 })}
-            </ScrollView>
+            </View>
         </View>
     );
 };
 
 const styles = StyleSheet.create({
-    container: {
-        marginBottom: SPACING.md,
-    },
-    label: {
-        color: COLORS.textPrimary,
-        fontSize: 14,
-        fontWeight: '500',
-        marginBottom: SPACING.sm,
-    },
-    scrollContent: {
-        gap: SPACING.sm,
-    },
-    categoryItem: {
-        flexDirection: 'row',
+    container: { marginBottom: SPACING.md },
+    title: { ...TYPE.heading, color: COLORS.ink, marginBottom: SPACING.sm + 2 },
+    grid: { flexDirection: 'row', gap: 10 },
+    tile: {
+        flex: 1,
         alignItems: 'center',
-        gap: SPACING.sm,
-        backgroundColor: COLORS.bgElevated,
-        paddingVertical: SPACING.md,
-        paddingHorizontal: SPACING.lg,
-        borderRadius: RADIUS.lg,
+        gap: 10,
+        paddingTop: 14,
+        paddingBottom: 12,
+        paddingHorizontal: 4,
+        backgroundColor: COLORS.surfaceMuted,
+        borderRadius: RADIUS.card,
         borderWidth: 2,
         borderColor: 'transparent',
     },
-    icon: {
-        fontSize: 24,
+    tileOn: {
+        backgroundColor: COLORS.ink,
+        borderColor: COLORS.ink,
+        transform: [{ rotate: '-2deg' }],
     },
-    categoryLabel: {
-        color: COLORS.textSecondary,
-        fontSize: 14,
-        fontWeight: '600',
+    disc: {
+        width: 52,
+        height: 52,
+        borderRadius: RADIUS.full,
+        backgroundColor: COLORS.surface,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
+    label: { ...TYPE.chip, color: COLORS.ink, textAlign: 'center' },
 });
 
 export default CategoryPicker;

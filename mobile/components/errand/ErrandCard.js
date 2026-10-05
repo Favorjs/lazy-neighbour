@@ -1,230 +1,220 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { Card, Badge, Avatar } from '../ui';
-import { COLORS, CATEGORIES, SPACING, RADIUS } from '../../constants/config';
+import { Badge, Avatar, Button, Icon } from '../ui';
+import { COLORS, CATEGORIES, SPACING, RADIUS, SHADOW, TYPE } from '../../constants/config';
+import { formatNaira } from '../../utils/format';
 
-export const ErrandCard = ({
-    errand,
-    onPress,
-    showDistance = false,
-    variant = 'default', // default, compact
-}) => {
-    const category = CATEGORIES[errand.category] || {};
+export const formatTime = (dateString) => {
+    const minutes = Math.floor((Date.now() - new Date(dateString)) / 60000);
+    const hours = Math.floor(minutes / 60);
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return `${minutes} min ago`;
+    if (hours < 24) return `${hours} h ago`;
+    return new Date(dateString).toLocaleDateString();
+};
+
+const formatMoney = formatNaira;
+
+// Chat is open while an errand is in progress, and only for the two people on it
+export const CHAT_OPEN_STATUSES = ['ACTIVE', 'COMPLETED'];
+
+export const canChat = (errand, userId) =>
+    !!userId &&
+    !!errand.runnerId &&
+    CHAT_OPEN_STATUSES.includes(errand.status) &&
+    (errand.requesterId === userId || errand.runnerId === userId);
+
+// The other person in the chat, from the viewer's side
+const chatPartner = (errand, userId) =>
+    errand.requesterId === userId ? errand.runner : errand.requester;
+
+// Where the errand sits on the journey: posted, accepted, running, paid
+const STEP_OF_STATUS = { PENDING: 1, ACTIVE: 2, COMPLETED: 3, RELEASED: 4, DISPUTED: 3, CANCELLED: 0 };
+
+// default: runner feed card with a one-tap Accept · tracking (alias: compact): requester list item
+export const ErrandCard = ({ errand, onPress, onAccept, onChat, currentUserId, acceptLoading = false, showDistance = true, variant = 'default' }) => {
+    const category = CATEGORIES[errand.category] || CATEGORIES.QUICK;
+    const chatOpen = !!onChat && canChat(errand, currentUserId);
+    const partnerName = chatPartner(errand, currentUserId)?.name?.split(' ')[0];
 
     const handlePress = () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         onPress?.(errand);
     };
 
-    const formatTime = (dateString) => {
-        const date = new Date(dateString);
-        const now = new Date();
-        const diff = now - date;
-        const minutes = Math.floor(diff / 60000);
-        const hours = Math.floor(minutes / 60);
-
-        if (minutes < 1) return 'Just now';
-        if (minutes < 60) return `${minutes}m ago`;
-        if (hours < 24) return `${hours}h ago`;
-        return date.toLocaleDateString();
-    };
-
-    if (variant === 'compact') {
+    if (variant === 'tracking' || variant === 'compact') {
+        const step = STEP_OF_STATUS[errand.status] ?? 0;
         return (
-            <TouchableOpacity onPress={handlePress} activeOpacity={0.7}>
-                <Card style={styles.compactCard}>
-                    <View style={styles.compactRow}>
-                        <Text style={styles.categoryIcon}>{category.icon}</Text>
-                        <View style={styles.compactContent}>
-                            <Text style={styles.compactTitle} numberOfLines={1}>{errand.title}</Text>
-                            <Text style={styles.compactMeta}>
-                                ${errand.bountyAmount} • {formatTime(errand.createdAt)}
-                            </Text>
+            <Pressable onPress={handlePress} style={[styles.card, styles.trackingCard]}>
+                <View style={styles.topRow}>
+                    <View style={styles.catRow}>
+                        <View style={styles.catDisc}>
+                            <Icon name={category.icon} size={18} />
                         </View>
-                        <Badge status={errand.status} size="sm" />
+                        <Text style={styles.catName}>{category.label}</Text>
                     </View>
-                </Card>
-            </TouchableOpacity>
+                    <Text style={styles.amount}>{formatMoney(errand.bountyAmount)}</Text>
+                </View>
+
+                <Text style={styles.title} numberOfLines={1}>{errand.title}</Text>
+
+                <View style={styles.steps}>
+                    {[1, 2, 3, 4].map((n) => (
+                        <View key={n} style={[styles.seg, n <= step && styles.segOn]} />
+                    ))}
+                </View>
+
+                <View style={styles.topRow}>
+                    <Badge status={errand.status} />
+                    <Text style={styles.meta}>{formatTime(errand.createdAt)}</Text>
+                </View>
+
+                {chatOpen ? (
+                    <Button
+                        title={partnerName ? `Chat with ${partnerName}` : 'Open chat'}
+                        icon="MessageCircle"
+                        size="sm"
+                        block
+                        bubbleIcon="ArrowRight"
+                        onPress={() => onChat(errand)}
+                    />
+                ) : null}
+            </Pressable>
         );
     }
 
     return (
-        <TouchableOpacity onPress={handlePress} activeOpacity={0.8}>
-            <Card variant="elevated" style={styles.card}>
-                {/* Header */}
-                <View style={styles.header}>
-                    <View style={styles.userInfo}>
-                        <Avatar
-                            source={errand.requester?.avatarUrl ? { uri: errand.requester.avatarUrl } : null}
-                            name={errand.requester?.name}
-                            size={40}
-                        />
-                        <View style={styles.userText}>
-                            <Text style={styles.userName}>{errand.requester?.name || 'Anonymous'}</Text>
-                            <Text style={styles.time}>{formatTime(errand.createdAt)}</Text>
-                        </View>
+        <Pressable onPress={handlePress} style={styles.card}>
+            <View style={styles.topRow}>
+                <View style={styles.catRow}>
+                    <View style={styles.catDisc}>
+                        <Icon name={category.icon} size={18} />
                     </View>
-                    <Badge status={errand.status} />
+                    <Text style={styles.catName}>{category.label}</Text>
                 </View>
-
-                {/* Category Tag */}
-                <View style={[styles.categoryTag, { backgroundColor: `${category.color}20` }]}>
-                    <Text style={styles.categoryIcon}>{category.icon}</Text>
-                    <Text style={[styles.categoryLabel, { color: category.color }]}>
-                        {category.label}
-                    </Text>
+                <View style={styles.ageRow}>
+                    <View style={styles.ageDot} />
+                    <Text style={styles.age}>{formatTime(errand.createdAt)}</Text>
                 </View>
+            </View>
 
-                {/* Content */}
-                <Text style={styles.title}>{errand.title}</Text>
-                <Text style={styles.description} numberOfLines={2}>
-                    {errand.description}
-                </Text>
+            <Text style={styles.title}>{errand.title}</Text>
+            <Text style={styles.desc} numberOfLines={1}>{errand.description}</Text>
 
-                {/* Footer */}
-                <View style={styles.footer}>
-                    <View style={styles.bountyContainer}>
-                        <Text style={styles.bountyLabel}>Bounty</Text>
-                        <Text style={styles.bountyAmount}>${errand.bountyAmount}</Text>
+            <View style={styles.chipRow}>
+                {showDistance && errand.distance !== undefined ? (
+                    <View style={styles.chip}>
+                        <Icon name="MapPin" size={14} />
+                        <Text style={styles.chipText}>{errand.distance} km</Text>
                     </View>
-
-                    {showDistance && errand.distance !== undefined && (
-                        <View style={styles.distanceContainer}>
-                            <Text style={styles.distanceIcon}>📍</Text>
-                            <Text style={styles.distanceText}>{errand.distance} km away</Text>
-                        </View>
-                    )}
-
-                    {errand.address && (
-                        <Text style={styles.address} numberOfLines={1}>
-                            📍 {errand.address}
-                        </Text>
-                    )}
+                ) : errand.address ? (
+                    <View style={[styles.chip, { flexShrink: 1 }]}>
+                        <Icon name="MapPin" size={14} />
+                        <Text style={styles.chipText} numberOfLines={1}>{errand.address}</Text>
+                    </View>
+                ) : null}
+                <View style={styles.bountyPill}>
+                    <Icon name="Sparkles" size={14} color={COLORS.white} />
+                    <Text style={styles.bountyText}>{formatMoney(errand.bountyAmount)}</Text>
                 </View>
-            </Card>
-        </TouchableOpacity>
+            </View>
+
+            <View style={styles.footer}>
+                <View style={styles.who}>
+                    <Avatar
+                        source={errand.requester?.avatarUrl ? { uri: errand.requester.avatarUrl } : null}
+                        name={errand.requester?.name}
+                        size={32}
+                    />
+                    <Text style={styles.whoName} numberOfLines={1}>{errand.requester?.name || 'A neighbour'}</Text>
+                    {errand.requester?.ratingScore ? (
+                        <View style={styles.rating}>
+                            <Icon name="Star" size={12} />
+                            <Text style={styles.ratingText}>{Number(errand.requester.ratingScore).toFixed(1)}</Text>
+                        </View>
+                    ) : null}
+                </View>
+                {chatOpen ? (
+                    <Button title="Chat" icon="MessageCircle" variant="primary" size="sm" onPress={() => onChat(errand)} />
+                ) : onAccept ? (
+                    <Button title="Accept" variant="primary" size="sm" loading={acceptLoading} onPress={() => onAccept(errand)} />
+                ) : (
+                    <Badge status={errand.status} size="sm" />
+                )}
+            </View>
+        </Pressable>
     );
 };
 
 const styles = StyleSheet.create({
     card: {
+        backgroundColor: COLORS.surface,
+        borderRadius: RADIUS.card,
+        padding: SPACING.md,
+        gap: 12,
         marginBottom: SPACING.md,
+        ...SHADOW.card,
     },
-    header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: SPACING.md,
-    },
-    userInfo: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: SPACING.sm,
-    },
-    userText: {
-        gap: 2,
-    },
-    userName: {
-        color: COLORS.textPrimary,
-        fontWeight: '600',
-        fontSize: 14,
-    },
-    time: {
-        color: COLORS.textMuted,
-        fontSize: 12,
-    },
-    categoryTag: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        alignSelf: 'flex-start',
-        paddingVertical: SPACING.xs,
-        paddingHorizontal: SPACING.sm,
+    trackingCard: { gap: 10 },
+    topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    catRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    catDisc: {
+        width: 36,
+        height: 36,
         borderRadius: RADIUS.full,
-        gap: SPACING.xs,
-        marginBottom: SPACING.sm,
+        backgroundColor: COLORS.surfaceMuted,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
-    categoryIcon: {
-        fontSize: 16,
+    catName: { ...TYPE.chip, color: COLORS.ink },
+    ageRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    ageDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.ink },
+    age: { ...TYPE.badge, color: COLORS.inkSecondary },
+    title: { ...TYPE.heading, fontFamily: TYPE.title.fontFamily, color: COLORS.ink },
+    desc: { ...TYPE.bodySm, color: COLORS.inkSecondary, marginTop: -6 },
+    chipRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+    chip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        backgroundColor: COLORS.surfaceMuted,
+        borderRadius: RADIUS.full,
+        paddingVertical: 6,
+        paddingHorizontal: 12,
     },
-    categoryLabel: {
-        fontSize: 12,
-        fontWeight: '600',
+    chipText: { ...TYPE.chip, color: COLORS.ink },
+    bountyPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        backgroundColor: COLORS.ink,
+        borderRadius: RADIUS.full,
+        paddingVertical: 4,
+        paddingLeft: 10,
+        paddingRight: 14,
+        transform: [{ rotate: '-3deg' }],
     },
-    title: {
-        color: COLORS.textPrimary,
-        fontSize: 18,
-        fontWeight: '700',
-        marginBottom: SPACING.xs,
-    },
-    description: {
-        color: COLORS.textSecondary,
-        fontSize: 14,
-        lineHeight: 20,
-        marginBottom: SPACING.md,
-    },
+    bountyText: { ...TYPE.cardTitle, fontFamily: TYPE.amount.fontFamily, color: COLORS.white },
     footer: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingTop: SPACING.md,
-        borderTopWidth: 1,
-        borderTopColor: 'rgba(255, 255, 255, 0.05)',
+        gap: 12,
+        backgroundColor: COLORS.surfaceMuted,
+        borderRadius: RADIUS.full,
+        padding: 6,
+        paddingRight: 6,
     },
-    bountyContainer: {
-        gap: 2,
-    },
-    bountyLabel: {
-        color: COLORS.textMuted,
-        fontSize: 10,
-        textTransform: 'uppercase',
-    },
-    bountyAmount: {
-        color: COLORS.accent,
-        fontSize: 24,
-        fontWeight: '800',
-    },
-    distanceContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: SPACING.xs,
-    },
-    distanceIcon: {
-        fontSize: 14,
-    },
-    distanceText: {
-        color: COLORS.textSecondary,
-        fontSize: 14,
-    },
-    address: {
-        color: COLORS.textSecondary,
-        fontSize: 12,
-        flex: 1,
-        textAlign: 'right',
-    },
-    // Compact styles
-    compactCard: {
-        marginBottom: SPACING.sm,
-        padding: SPACING.sm,
-    },
-    compactRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: SPACING.sm,
-    },
-    compactContent: {
-        flex: 1,
-        gap: 2,
-    },
-    compactTitle: {
-        color: COLORS.textPrimary,
-        fontSize: 14,
-        fontWeight: '600',
-    },
-    compactMeta: {
-        color: COLORS.textMuted,
-        fontSize: 12,
-    },
+    who: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
+    whoName: { ...TYPE.chip, color: COLORS.ink, flexShrink: 1 },
+    rating: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+    ratingText: { ...TYPE.caption, color: COLORS.inkSecondary },
+    amount: { ...TYPE.amount, color: COLORS.ink },
+    steps: { flexDirection: 'row', gap: 4 },
+    seg: { flex: 1, height: 6, borderRadius: RADIUS.detail, backgroundColor: COLORS.surfacePressed },
+    segOn: { backgroundColor: COLORS.ink },
+    meta: { ...TYPE.caption, color: COLORS.inkSecondary },
 });
 
 export default ErrandCard;

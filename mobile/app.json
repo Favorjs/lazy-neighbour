@@ -6,13 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "scheme": "lazyneighbour",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0F172A"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.lazyneighbour.app",
@@ -25,7 +19,6 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0F172A"
       },
-      "edgeToEdgeEnabled": true,
       "package": "com.lazyneighbour.app",
       "config": {
         "googleMaps": {
@@ -45,6 +38,14 @@
     "plugins": [
       "expo-router",
       [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#0F172A"
+        }
+      ],
+      [
         "expo-location",
         {
           "locationAlwaysAndWhenInUsePermission": "Allow Lazy Neighbour to use your location to find nearby errands."
@@ -56,7 +57,9 @@
           "photosPermission": "Allow Lazy Neighbour to access your photos for proof of completion.",
           "cameraPermission": "Allow Lazy Neighbour to use your camera for proof of completion."
         }
-      ]
+      ],
+      "expo-font",
+      "expo-sqlite"
     ],
     "extra": {
       "eas": {

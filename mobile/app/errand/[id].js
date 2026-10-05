@@ -4,17 +4,19 @@ import {
     Text,
     StyleSheet,
     ScrollView,
-    TouchableOpacity,
-    Alert,
-    ActivityIndicator,
     Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import { Card, Badge, Avatar, Button } from '../../components/ui';
-import { COLORS, CATEGORIES, SPACING, RADIUS } from '../../constants/config';
+import { Card, Badge, Avatar, Button, IconButton, Icon, Sheet } from '../../components/ui';
+import { StatusTimeline } from '../../components/errand/StatusTimeline';
+import { ErrandDetailSkeleton } from '../../components/ui/Skeleton';
+import { COLORS, CATEGORIES, SPACING, RADIUS, SHADOW, TYPE } from '../../constants/config';
+import { formatNaira } from '../../utils/format';
 import api from '../../services/api';
+
+const money = formatNaira;
 
 export default function ErrandDetailScreen() {
     const router = useRouter();
@@ -30,113 +32,82 @@ export default function ErrandDetailScreen() {
 
     const fetchData = async () => {
         try {
-            const [errandData, userData] = await Promise.all([
-                api.getErrand(id),
-                api.getMe(),
-            ]);
+            const [errandData, userData] = await Promise.all([api.getErrand(id), api.getMe()]);
             setErrand(errandData.errand);
             setUser(userData.user);
         } catch (error) {
             console.error('Failed to fetch errand:', error);
-            Alert.alert('Error', 'Failed to load errand details');
+            Sheet.alert('Something went wrong', error.message || 'Could not load this errand');
         } finally {
             setLoading(false);
         }
     };
 
-    const handleAccept = async () => {
+    const run = async (action, onDone) => {
         setActionLoading(true);
         try {
-            await api.acceptErrand(id);
-            Alert.alert('Accepted! 🎉', 'You are now running this errand.');
-            fetchData();
+            await action();
+            onDone?.();
         } catch (error) {
-            Alert.alert('Error', error.message || 'Failed to accept errand');
+            Sheet.alert('Something went wrong', error.message || 'Please try again');
         } finally {
             setActionLoading(false);
         }
     };
 
+    const handleAccept = () =>
+        run(() => api.acceptErrand(id), () => {
+            Sheet.alert('It is yours', 'You are now running this errand.');
+            fetchData();
+        });
+
     const handleComplete = async () => {
-        // Optionally pick a proof photo
         const result = await ImagePicker.launchCameraAsync({
             mediaTypes: ImagePicker.MediaTypeOptions.Images,
             quality: 0.8,
         });
-
         if (result.canceled) return;
 
-        setActionLoading(true);
-        try {
-            // In a real app, upload the image first and get URL
-            const proofUrl = result.assets[0].uri;
-            await api.completeErrand(id, proofUrl);
-            Alert.alert('Completed! ✅', 'Waiting for the requester to release payment.');
+        run(() => api.completeErrand(id, result.assets[0].uri), () => {
+            Sheet.alert('Nice work', 'Waiting for the requester to release your payment.');
             fetchData();
-        } catch (error) {
-            Alert.alert('Error', error.message || 'Failed to complete errand');
-        } finally {
-            setActionLoading(false);
-        }
+        });
     };
 
-    const handleRelease = async () => {
-        Alert.alert(
-            'Release Payment',
-            `Are you sure you want to release $${errand.bountyAmount} to the runner?`,
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Release',
-                    onPress: async () => {
-                        setActionLoading(true);
-                        try {
-                            await api.releasePayment(id);
-                            Alert.alert('Payment Released! 💰', 'Thank you for using Lazy Neighbour!');
-                            fetchData();
-                        } catch (error) {
-                            Alert.alert('Error', error.message || 'Failed to release payment');
-                        } finally {
-                            setActionLoading(false);
-                        }
-                    },
-                },
-            ]
-        );
-    };
+    const handleRelease = () =>
+        Sheet.alert('Release payment', `Pay ${money(errand.bountyAmount)} to your runner?`, [
+            { text: 'Not yet', style: 'cancel' },
+            {
+                text: 'Release payment',
+                onPress: () =>
+                    run(() => api.releasePayment(id), () => {
+                        Sheet.alert('Paid', 'Thanks for using Lazy Neighbour.');
+                        fetchData();
+                    }),
+            },
+        ]);
 
-    const handleCancel = async () => {
-        Alert.alert(
-            'Cancel Errand',
-            'Are you sure you want to cancel this errand?',
-            [
-                { text: 'No', style: 'cancel' },
-                {
-                    text: 'Yes, Cancel',
-                    style: 'destructive',
-                    onPress: async () => {
-                        setActionLoading(true);
-                        try {
-                            await api.cancelErrand(id);
-                            Alert.alert('Cancelled', 'Your errand has been cancelled.');
-                            router.back();
-                        } catch (error) {
-                            Alert.alert('Error', error.message || 'Failed to cancel errand');
-                        } finally {
-                            setActionLoading(false);
-                        }
-                    },
-                },
-            ]
-        );
-    };
+    const handleCancel = () =>
+        Sheet.alert('Cancel errand', 'Are you sure you want to cancel this errand?', [
+            { text: 'Keep it', style: 'cancel' },
+            {
+                text: 'Cancel errand',
+                style: 'destructive',
+                onPress: () =>
+                    run(() => api.cancelErrand(id), () => {
+                        Sheet.alert('Cancelled', 'Your errand has been cancelled.');
+                        router.back();
+                    }),
+            },
+        ]);
 
     if (loading) {
         return (
             <SafeAreaView style={styles.container}>
-                <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color={COLORS.primary} />
+                <View style={styles.header}>
+                    <IconButton icon="ChevronLeft" label="Back" onPress={() => router.back()} />
                 </View>
+                <ErrandDetailSkeleton />
             </SafeAreaView>
         );
     }
@@ -144,332 +115,163 @@ export default function ErrandDetailScreen() {
     if (!errand) {
         return (
             <SafeAreaView style={styles.container}>
-                <View style={styles.loadingContainer}>
-                    <Text style={styles.errorText}>Errand not found</Text>
+                <View style={styles.center}>
+                    <Text style={styles.muted}>We could not find that errand.</Text>
+                    <Button title="Go back" onPress={() => router.back()} style={{ marginTop: SPACING.md }} />
                 </View>
             </SafeAreaView>
         );
     }
 
-    const category = CATEGORIES[errand.category] || {};
+    const category = CATEGORIES[errand.category] || CATEGORIES.QUICK;
     const isRequester = user?.id === errand.requesterId;
     const isRunner = user?.id === errand.runnerId;
     const canAccept = !isRequester && errand.status === 'PENDING';
     const canComplete = isRunner && errand.status === 'ACTIVE';
     const canRelease = isRequester && errand.status === 'COMPLETED';
     const canCancel = isRequester && errand.status === 'PENDING';
+    const hasActions = canAccept || canComplete || canRelease || canCancel;
+    const chatOpen = ['ACTIVE', 'COMPLETED'].includes(errand.status);
+
+    const Person = ({ label, person, chat }) => (
+        <View style={styles.person}>
+            <Avatar
+                source={person?.avatarUrl ? { uri: person.avatarUrl } : null}
+                name={person?.name}
+                size={44}
+            />
+            <View style={{ flex: 1 }}>
+                <Text style={styles.overline}>{label}</Text>
+                <View style={styles.personRow}>
+                    <Text style={styles.personName} numberOfLines={1}>{person?.name}</Text>
+                    <Icon name="Star" size={12} />
+                    <Text style={styles.rating}>{Number(person?.ratingScore ?? 5).toFixed(1)}</Text>
+                </View>
+            </View>
+            {chat ? (
+                <IconButton icon="MessageCircle" label="Message" onPress={() => router.push(`/chat/${errand.id}`)} />
+            ) : null}
+        </View>
+    );
 
     return (
         <SafeAreaView style={styles.container}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-                {/* Header */}
-                <View style={styles.header}>
-                    <TouchableOpacity onPress={() => router.back()}>
-                        <Text style={styles.backButton}>←</Text>
-                    </TouchableOpacity>
-                    <Badge status={errand.status} />
-                </View>
+            <View style={styles.header}>
+                <IconButton icon="ChevronLeft" label="Back" onPress={() => router.back()} />
+                <Badge status={errand.status} />
+            </View>
 
-                {/* Category & Title */}
-                <View style={[styles.categoryTag, { backgroundColor: `${category.color}20` }]}>
-                    <Text style={styles.categoryIcon}>{category.icon}</Text>
-                    <Text style={[styles.categoryLabel, { color: category.color }]}>
-                        {category.label}
-                    </Text>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+                <View style={styles.chip}>
+                    <Icon name={category.icon} size={14} />
+                    <Text style={styles.chipText}>{category.label}</Text>
                 </View>
 
                 <Text style={styles.title}>{errand.title}</Text>
                 <Text style={styles.description}>{errand.description}</Text>
 
-                {/* Location */}
-                {errand.address && (
-                    <View style={styles.locationRow}>
-                        <Text style={styles.locationIcon}>📍</Text>
+                {errand.address ? (
+                    <View style={styles.location}>
+                        <Icon name="MapPin" size={14} color={COLORS.inkSecondary} />
                         <Text style={styles.locationText}>{errand.address}</Text>
                     </View>
-                )}
+                ) : null}
 
-                {/* Bounty Card */}
-                <Card variant="elevated" style={styles.bountyCard}>
-                    <View style={styles.bountyRow}>
-                        <Text style={styles.bountyLabel}>Bounty</Text>
-                        <Text style={styles.bountyAmount}>${errand.bountyAmount}</Text>
-                    </View>
-                    <View style={styles.bountyRow}>
-                        <Text style={styles.feeLabel}>+ Service Fee</Text>
-                        <Text style={styles.feeAmount}>${errand.serviceFee.toFixed(2)}</Text>
-                    </View>
+                <Card variant="elevated" style={styles.bounty}>
+                    <Text style={styles.overline}>BOUNTY</Text>
+                    <Text style={styles.amountXl}>{money(errand.bountyAmount)}</Text>
+                    <Text style={styles.fee}>+ {money(errand.serviceFee)} service fee</Text>
                 </Card>
 
-                {/* Requester Info */}
-                <Card style={styles.userCard}>
-                    <Text style={styles.userCardTitle}>Posted by</Text>
-                    <View style={styles.userRow}>
-                        <Avatar
-                            source={errand.requester?.avatarUrl ? { uri: errand.requester.avatarUrl } : null}
-                            name={errand.requester?.name}
-                            size={48}
-                        />
-                        <View style={styles.userInfo}>
-                            <Text style={styles.userName}>{errand.requester?.name}</Text>
-                            <View style={styles.ratingRow}>
-                                <Text>⭐</Text>
-                                <Text style={styles.ratingText}>
-                                    {errand.requester?.ratingScore?.toFixed(1) || '5.0'}
-                                </Text>
-                            </View>
-                        </View>
-                        {!isRequester && errand.status !== 'PENDING' && (
-                            <TouchableOpacity
-                                style={styles.chatButton}
-                                onPress={() => router.push(`/chat/${errand.id}`)}
-                            >
-                                <Text>💬</Text>
-                            </TouchableOpacity>
-                        )}
-                    </View>
+                <Text style={styles.section}>How it is going</Text>
+                <Card style={styles.card}>
+                    <StatusTimeline errand={errand} isRequester={isRequester} />
                 </Card>
 
-                {/* Runner Info (if assigned) */}
-                {errand.runner && (
-                    <Card style={styles.userCard}>
-                        <Text style={styles.userCardTitle}>Runner</Text>
-                        <View style={styles.userRow}>
-                            <Avatar
-                                source={errand.runner?.avatarUrl ? { uri: errand.runner.avatarUrl } : null}
-                                name={errand.runner?.name}
-                                size={48}
-                            />
-                            <View style={styles.userInfo}>
-                                <Text style={styles.userName}>{errand.runner?.name}</Text>
-                                <View style={styles.ratingRow}>
-                                    <Text>⭐</Text>
-                                    <Text style={styles.ratingText}>
-                                        {errand.runner?.ratingScore?.toFixed(1) || '5.0'}
-                                    </Text>
-                                </View>
-                            </View>
-                            {isRequester && (
-                                <TouchableOpacity
-                                    style={styles.chatButton}
-                                    onPress={() => router.push(`/chat/${errand.id}`)}
-                                >
-                                    <Text>💬</Text>
-                                </TouchableOpacity>
-                            )}
-                        </View>
+                <Card style={styles.card} padding={SPACING.sm + 4}>
+                    <Person label="POSTED BY" person={errand.requester} chat={!isRequester && chatOpen} />
+                    {errand.runner ? (
+                        <>
+                            <View style={styles.divider} />
+                            <Person label="RUNNER" person={errand.runner} chat={isRequester && chatOpen} />
+                        </>
+                    ) : null}
+                </Card>
+
+                {errand.proofPhotoUrl ? (
+                    <Card style={styles.card}>
+                        <Text style={styles.overline}>PROOF OF COMPLETION</Text>
+                        <Image source={{ uri: errand.proofPhotoUrl }} style={styles.proof} resizeMode="cover" />
                     </Card>
-                )}
-
-                {/* Proof Photo */}
-                {errand.proofPhotoUrl && (
-                    <Card style={styles.proofCard}>
-                        <Text style={styles.userCardTitle}>Proof of Completion</Text>
-                        <Image
-                            source={{ uri: errand.proofPhotoUrl }}
-                            style={styles.proofImage}
-                            resizeMode="cover"
-                        />
-                    </Card>
-                )}
-
-                {/* Action Buttons */}
-                <View style={styles.actions}>
-                    {canAccept && (
-                        <Button
-                            title="Accept This Errand 🏃"
-                            onPress={handleAccept}
-                            loading={actionLoading}
-                            size="lg"
-                        />
-                    )}
-
-                    {canComplete && (
-                        <Button
-                            title="Mark as Complete ✅"
-                            onPress={handleComplete}
-                            loading={actionLoading}
-                            size="lg"
-                            variant="secondary"
-                        />
-                    )}
-
-                    {canRelease && (
-                        <Button
-                            title="Release Payment 💰"
-                            onPress={handleRelease}
-                            loading={actionLoading}
-                            size="lg"
-                        />
-                    )}
-
-                    {canCancel && (
-                        <Button
-                            title="Cancel Errand"
-                            onPress={handleCancel}
-                            loading={actionLoading}
-                            variant="outline"
-                            style={styles.cancelButton}
-                        />
-                    )}
-                </View>
+                ) : null}
             </ScrollView>
+
+            {hasActions ? (
+                <View style={styles.actions}>
+                    {canAccept ? (
+                        <Button title="Accept errand" variant="primary" block loading={actionLoading} onPress={handleAccept} />
+                    ) : null}
+                    {canComplete ? (
+                        <Button title="Mark as done" variant="primary" block bubbleIcon="Camera" loading={actionLoading} onPress={handleComplete} />
+                    ) : null}
+                    {canRelease ? (
+                        <Button title="Release payment" variant="secondary" block bubbleIcon="Wallet" loading={actionLoading} onPress={handleRelease} />
+                    ) : null}
+                    {canCancel ? (
+                        <Button title="Cancel errand" destructive block bubbleIcon="X" loading={actionLoading} onPress={handleCancel} />
+                    ) : null}
+                </View>
+            ) : null}
         </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: COLORS.bgDark,
-    },
-    loadingContainer: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    errorText: {
-        color: COLORS.textSecondary,
-    },
+    container: { flex: 1, backgroundColor: COLORS.surface },
+    center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: SPACING.lg },
+    muted: { ...TYPE.body, color: COLORS.inkSecondary },
     header: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        padding: SPACING.lg,
+        paddingHorizontal: SPACING.lg,
+        paddingVertical: SPACING.sm,
     },
-    backButton: {
-        color: COLORS.textPrimary,
-        fontSize: 28,
-        fontWeight: '300',
-    },
-    categoryTag: {
+    scroll: { paddingHorizontal: SPACING.lg, paddingBottom: SPACING.xl },
+    chip: {
         flexDirection: 'row',
         alignItems: 'center',
         alignSelf: 'flex-start',
-        paddingVertical: SPACING.xs,
-        paddingHorizontal: SPACING.md,
+        gap: 6,
+        backgroundColor: COLORS.surfaceMuted,
         borderRadius: RADIUS.full,
-        marginHorizontal: SPACING.lg,
-        marginBottom: SPACING.md,
-        gap: SPACING.xs,
-    },
-    categoryIcon: {
-        fontSize: 16,
-    },
-    categoryLabel: {
-        fontSize: 12,
-        fontWeight: '600',
-    },
-    title: {
-        color: COLORS.textPrimary,
-        fontSize: 28,
-        fontWeight: '800',
-        paddingHorizontal: SPACING.lg,
-        marginBottom: SPACING.sm,
-    },
-    description: {
-        color: COLORS.textSecondary,
-        fontSize: 16,
-        lineHeight: 24,
-        paddingHorizontal: SPACING.lg,
+        paddingVertical: 6,
+        paddingHorizontal: 12,
+        marginTop: SPACING.sm,
         marginBottom: SPACING.md,
     },
-    locationRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: SPACING.lg,
-        marginBottom: SPACING.lg,
-        gap: SPACING.xs,
-    },
-    locationIcon: {
-        fontSize: 16,
-    },
-    locationText: {
-        color: COLORS.textSecondary,
-        fontSize: 14,
-    },
-    bountyCard: {
-        marginHorizontal: SPACING.lg,
-        marginBottom: SPACING.md,
-    },
-    bountyRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: SPACING.xs,
-    },
-    bountyLabel: {
-        color: COLORS.textSecondary,
-        fontSize: 14,
-    },
-    bountyAmount: {
-        color: COLORS.accent,
-        fontSize: 32,
-        fontWeight: '800',
-    },
-    feeLabel: {
-        color: COLORS.textMuted,
-        fontSize: 12,
-    },
-    feeAmount: {
-        color: COLORS.textMuted,
-        fontSize: 12,
-    },
-    userCard: {
-        marginHorizontal: SPACING.lg,
-        marginBottom: SPACING.md,
-    },
-    userCardTitle: {
-        color: COLORS.textMuted,
-        fontSize: 12,
-        marginBottom: SPACING.sm,
-        textTransform: 'uppercase',
-    },
-    userRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: SPACING.md,
-    },
-    userInfo: {
-        flex: 1,
-    },
-    userName: {
-        color: COLORS.textPrimary,
-        fontSize: 16,
-        fontWeight: '600',
-    },
-    ratingRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        marginTop: 2,
-    },
-    ratingText: {
-        color: COLORS.textSecondary,
-        fontSize: 14,
-    },
-    chatButton: {
-        width: 44,
-        height: 44,
-        backgroundColor: COLORS.primary,
-        borderRadius: 22,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    proofCard: {
-        marginHorizontal: SPACING.lg,
-        marginBottom: SPACING.md,
-    },
-    proofImage: {
-        width: '100%',
-        height: 200,
-        borderRadius: RADIUS.md,
-    },
+    chipText: { ...TYPE.chip, color: COLORS.ink },
+    title: { ...TYPE.title, color: COLORS.ink },
+    description: { ...TYPE.body, color: COLORS.inkSecondary, marginTop: SPACING.sm },
+    location: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: SPACING.md },
+    locationText: { ...TYPE.bodySm, color: COLORS.inkSecondary, flex: 1 },
+    bounty: { marginTop: SPACING.lg, gap: 2 },
+    overline: { ...TYPE.overline, color: COLORS.inkSecondary },
+    amountXl: { ...TYPE.amountXl, color: COLORS.ink },
+    fee: { ...TYPE.bodySm, color: COLORS.inkSecondary },
+    section: { ...TYPE.heading, color: COLORS.ink, marginTop: SPACING.xl, marginBottom: SPACING.sm + 2 },
+    card: { marginBottom: SPACING.md },
+    person: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4 },
+    personRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    personName: { ...TYPE.cardTitle, color: COLORS.ink, flexShrink: 1 },
+    rating: { ...TYPE.caption, color: COLORS.inkSecondary },
+    divider: { height: 1, backgroundColor: COLORS.line, marginVertical: 8 },
+    proof: { width: '100%', height: 200, borderRadius: RADIUS.tile, marginTop: SPACING.sm },
     actions: {
         padding: SPACING.lg,
-        gap: SPACING.md,
-    },
-    cancelButton: {
-        borderColor: COLORS.error,
+        paddingTop: SPACING.md,
+        gap: SPACING.sm + 4,
+        backgroundColor: COLORS.surface,
+        ...SHADOW.sheet,
     },
 });

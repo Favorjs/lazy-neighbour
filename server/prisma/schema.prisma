@@ -1,0 +1,206 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  LAZY
+  RUNNER
+}
+
+enum ErrandCategory {
+  FOOD
+  STORE
+  HOME
+  QUICK
+}
+
+enum WalletTxType {
+  TOPUP
+  WITHDRAWAL
+  ESCROW_HOLD
+  ESCROW_REFUND
+  EARNING
+}
+
+enum NotificationType {
+  ERRAND_ACCEPTED
+  ERRAND_COMPLETED
+  PAYMENT_RECEIVED
+  MESSAGE
+  WALLET
+  SYSTEM
+}
+
+enum ErrandStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  RELEASED
+  DISPUTED
+  CANCELLED
+}
+
+model User {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  email            String   @unique
+  password         String
+  name             String
+  phone            String?
+  avatarUrl        String?  @map("avatar_url")
+  ratingScore      Decimal  @default(5.00) @map("rating_score") @db.Decimal(3, 2)
+  karmaPoints      Int      @default(0) @map("karma_points")
+  totalEarnings    Decimal  @default(0) @map("total_earnings") @db.Decimal(10, 2)
+  totalSpent       Decimal  @default(0) @map("total_spent") @db.Decimal(10, 2)
+  currentRole      Role     @default(LAZY) @map("current_role")
+  stripeAccountId  String?  @map("stripe_account_id")
+  stripeCustomerId String?  @map("stripe_customer_id")
+  walletBalance    Decimal  @default(0) @map("wallet_balance") @db.Decimal(12, 2)
+  isVerified       Boolean  @default(false) @map("is_verified")
+  pushToken        String?  @map("push_token")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  errandsRequested Errand[]  @relation("Requester")
+  errandsRun       Errand[]  @relation("Runner")
+  messages         Message[]
+  ratingsGiven     Rating[]  @relation("Rater")
+  ratingsReceived  Rating[]  @relation("Rated")
+  walletTxs        WalletTransaction[]
+  bankAccounts     BankAccount[]
+  notifications    Notification[]
+
+  @@map("users")
+}
+
+model Errand {
+  id            String         @id @default(uuid(7)) @db.Uuid
+  title         String
+  description   String
+  category      ErrandCategory
+  bountyAmount  Decimal        @map("bounty_amount") @db.Decimal(10, 2)
+  serviceFee    Decimal        @default(0) @map("service_fee") @db.Decimal(10, 2)
+  status        ErrandStatus   @default(PENDING)
+  locationLat   Decimal        @map("location_lat") @db.Decimal(10, 7)
+  locationLng   Decimal        @map("location_lng") @db.Decimal(10, 7)
+  address       String?
+  proofPhotoUrl String?        @map("proof_photo_url")
+  requesterId   String         @map("requester_id") @db.Uuid
+  runnerId      String?        @map("runner_id") @db.Uuid
+  acceptedAt    DateTime?      @map("accepted_at") @db.Timestamptz
+  completedAt   DateTime?      @map("completed_at") @db.Timestamptz
+  releasedAt    DateTime?      @map("released_at") @db.Timestamptz
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  requester   User         @relation("Requester", fields: [requesterId], references: [id], onDelete: Cascade)
+  runner      User?        @relation("Runner", fields: [runnerId], references: [id], onDelete: SetNull)
+  transaction Transaction?
+  messages    Message[]
+  ratings     Rating[]
+
+  @@index([status, createdAt])
+  @@index([requesterId])
+  @@index([runnerId])
+  @@map("errands")
+}
+
+model Transaction {
+  id                  String   @id @default(uuid(7)) @db.Uuid
+  errandId            String   @unique @map("errand_id") @db.Uuid
+  stripePaymentIntent String?  @map("stripe_payment_intent")
+  stripeTransferId    String?  @map("stripe_transfer_id")
+  amount              Decimal  @db.Decimal(10, 2)
+  serviceFee          Decimal  @default(0) @map("service_fee") @db.Decimal(10, 2)
+  runnerPayout        Decimal  @default(0) @map("runner_payout") @db.Decimal(10, 2)
+  status              String   @default("PENDING")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  errand Errand @relation(fields: [errandId], references: [id], onDelete: Cascade)
+
+  @@map("transactions")
+}
+
+model Message {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  errandId  String   @map("errand_id") @db.Uuid
+  senderId  String   @map("sender_id") @db.Uuid
+  content   String
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  errand Errand @relation(fields: [errandId], references: [id], onDelete: Cascade)
+  sender User   @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([errandId, createdAt])
+  @@map("messages")
+}
+
+model Rating {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  errandId  String   @map("errand_id") @db.Uuid
+  raterId   String   @map("rater_id") @db.Uuid
+  ratedId   String   @map("rated_id") @db.Uuid
+  score     Int      @db.SmallInt
+  comment   String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  errand Errand @relation(fields: [errandId], references: [id], onDelete: Cascade)
+  rater  User   @relation("Rater", fields: [raterId], references: [id], onDelete: Cascade)
+  rated  User   @relation("Rated", fields: [ratedId], references: [id], onDelete: Cascade)
+
+  @@map("ratings")
+}
+
+model WalletTransaction {
+  id           String       @id @default(uuid(7)) @db.Uuid
+  userId       String       @map("user_id") @db.Uuid
+  type         WalletTxType
+  // Signed: money in is positive, money out is negative
+  amount       Decimal      @db.Decimal(12, 2)
+  balanceAfter Decimal      @map("balance_after") @db.Decimal(12, 2)
+  description  String
+  errandId     String?      @map("errand_id") @db.Uuid
+  status       String       @default("COMPLETED")
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("wallet_transactions")
+}
+
+model BankAccount {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  bankName      String   @map("bank_name")
+  accountNumber String   @map("account_number")
+  accountName   String   @map("account_name")
+  isDefault     Boolean  @default(false) @map("is_default")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, accountNumber, bankName])
+  @@map("bank_accounts")
+}
+
+model Notification {
+  id        String           @id @default(uuid(7)) @db.Uuid
+  userId    String           @map("user_id") @db.Uuid
+  type      NotificationType
+  title     String
+  body      String
+  errandId  String?          @map("errand_id") @db.Uuid
+  isRead    Boolean          @default(false) @map("is_read")
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt])
+  @@map("notifications")
+}

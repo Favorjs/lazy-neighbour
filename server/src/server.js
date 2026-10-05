@@ -8,6 +8,8 @@ const authRoutes = require('./routes/authRoutes');
 const errandRoutes = require('./routes/errandRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const chatRoutes = require('./routes/chatRoutes');
+const walletRoutes = require('./routes/walletRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
 const { setupSocketHandlers } = require('./services/socketService');
 
 const app = express();
@@ -42,6 +44,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/errands', errandRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/wallet', walletRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // Setup Socket.io handlers
 setupSocketHandlers(io);

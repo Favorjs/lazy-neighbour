@@ -1,25 +1,12 @@
 /**
- * Database connection using @anclatechs/sql-buns
- * Provides pool access and utility functions for raw SQL queries
+ * Prisma client singleton (PostgreSQL via the pg driver adapter)
  */
 require('dotenv').config();
 
-const {
-    pool,
-    getAllRows,
-    getSingleRow,
-    createRowAndReturn,
-    batchTransaction,
-    RecordDoesNotExist,
-    NonUniqueRecordError,
-} = require('@anclatechs/sql-buns');
+const { PrismaPg } = require('@prisma/adapter-pg');
+const { PrismaClient, Prisma } = require('@prisma/client');
 
-module.exports = {
-    pool,
-    getAllRows,
-    getSingleRow,
-    createRowAndReturn,
-    batchTransaction,
-    RecordDoesNotExist,
-    NonUniqueRecordError,
-};
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+const prisma = new PrismaClient({ adapter });
+
+module.exports = { prisma, Prisma };

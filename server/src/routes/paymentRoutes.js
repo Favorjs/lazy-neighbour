@@ -1,5 +1,5 @@
 const express = require('express');
-const { pool } = require('../models/db');
+const { prisma } = require('../models/db');
 const { authMiddleware } = require('../middleware/authMiddleware');
 
 const router = express.Router();
@@ -21,40 +21,49 @@ router.post('/create-payment-intent', authMiddleware, async (req, res) => {
 
         const { errandId } = req.body;
 
-        const errandResult = await pool.query(`
-            SELECT * FROM errands WHERE id = $1
-        `, [errandId]);
+        const errand = await prisma.errand.findUnique({ where: { id: errandId } });
 
-        if (errandResult.rows.length === 0) {
+        if (!errand) {
             return res.status(404).json({ error: 'Errand not found' });
         }
 
-        const errand = errandResult.rows[0];
-
-        if (errand.requester_id !== req.user.id) {
+        if (errand.requesterId !== req.user.id) {
             return res.status(403).json({ error: 'Not authorized' });
         }
 
-        const totalAmount = parseFloat(errand.bounty_amount) + parseFloat(errand.service_fee);
+        const serviceFee = Number(errand.serviceFee);
+        const totalAmount = Number(errand.bountyAmount) + serviceFee;
 
         // Create payment intent with manual capture (for escrow)
         const paymentIntent = await stripe.paymentIntents.create({
             amount: Math.round(totalAmount * 100), // Convert to cents
-            currency: 'usd',
+            currency: 'ngn',
             capture_method: 'manual', // Hold funds, capture later
             metadata: {
                 errandId: errand.id,
                 requesterId: req.user.id,
-                bountyAmount: errand.bounty_amount.toString(),
-                serviceFee: errand.service_fee.toString()
+                bountyAmount: errand.bountyAmount.toString(),
+                serviceFee: errand.serviceFee.toString()
             }
         });
 
-        // Create transaction record
-        await pool.query(`
-            INSERT INTO transactions (errand_id, stripe_payment_intent, amount, service_fee, status)
-            VALUES ($1, $2, $3, $4, 'HELD')
-        `, [errand.id, paymentIntent.id, totalAmount, parseFloat(errand.service_fee)]);
+        // Create (or replace, on retry) the transaction record
+        await prisma.transaction.upsert({
+            where: { errandId: errand.id },
+            create: {
+                errandId: errand.id,
+                stripePaymentIntent: paymentIntent.id,
+                amount: totalAmount,
+                serviceFee,
+                status: 'HELD'
+            },
+            update: {
+                stripePaymentIntent: paymentIntent.id,
+                amount: totalAmount,
+                serviceFee,
+                status: 'HELD'
+            }
+        });
 
         res.json({
             clientSecret: paymentIntent.client_secret,
@@ -76,48 +85,51 @@ router.post('/capture', authMiddleware, async (req, res) => {
         const { errandId } = req.body;
 
         // Get errand with transaction and runner
-        const errandResult = await pool.query(`
-            SELECT e.*, t.id as transaction_id, t.stripe_payment_intent, 
-                   r.stripe_account_id as runner_stripe_account_id
-            FROM errands e
-            LEFT JOIN transactions t ON t.errand_id = e.id
-            LEFT JOIN users r ON e.runner_id = r.id
-            WHERE e.id = $1
-        `, [errandId]);
+        const errand = await prisma.errand.findUnique({
+            where: { id: errandId },
+            include: {
+                transaction: true,
+                runner: { select: { stripeAccountId: true } }
+            }
+        });
 
-        if (errandResult.rows.length === 0) {
+        if (!errand) {
             return res.status(404).json({ error: 'Errand not found' });
         }
 
-        const errand = errandResult.rows[0];
-
-        if (errand.requester_id !== req.user.id) {
+        if (errand.requesterId !== req.user.id) {
             return res.status(403).json({ error: 'Not authorized' });
         }
 
-        if (!errand.stripe_payment_intent) {
+        if (!errand.transaction?.stripePaymentIntent) {
             return res.status(400).json({ error: 'No payment to capture' });
         }
 
         // Capture the payment
-        await stripe.paymentIntents.capture(errand.stripe_payment_intent);
+        await stripe.paymentIntents.capture(errand.transaction.stripePaymentIntent);
 
         // If runner has a Stripe Connect account, create transfer
-        if (errand.runner_stripe_account_id) {
+        const runnerStripeAccountId = errand.runner?.stripeAccountId;
+        if (runnerStripeAccountId) {
+            const bounty = Number(errand.bountyAmount);
+
             const transfer = await stripe.transfers.create({
-                amount: Math.round(parseFloat(errand.bounty_amount) * 100),
-                currency: 'usd',
-                destination: errand.runner_stripe_account_id,
+                amount: Math.round(bounty * 100),
+                currency: 'ngn',
+                destination: runnerStripeAccountId,
                 metadata: {
                     errandId: errand.id
                 }
             });
 
-            await pool.query(`
-                UPDATE transactions 
-                SET stripe_transfer_id = $1, runner_payout = $2, status = 'RELEASED', updated_at = NOW()
-                WHERE id = $3
-            `, [transfer.id, parseFloat(errand.bounty_amount), errand.transaction_id]);
+            await prisma.transaction.update({
+                where: { id: errand.transaction.id },
+                data: {
+                    stripeTransferId: transfer.id,
+                    runnerPayout: bounty,
+                    status: 'RELEASED'
+                }
+            });
         }
 
         res.json({ message: 'Payment captured and transferred' });
@@ -136,29 +148,26 @@ router.post('/refund', authMiddleware, async (req, res) => {
 
         const { errandId } = req.body;
 
-        const errandResult = await pool.query(`
-            SELECT e.*, t.id as transaction_id, t.stripe_payment_intent
-            FROM errands e
-            LEFT JOIN transactions t ON t.errand_id = e.id
-            WHERE e.id = $1
-        `, [errandId]);
+        const errand = await prisma.errand.findUnique({
+            where: { id: errandId },
+            include: { transaction: true }
+        });
 
-        if (errandResult.rows.length === 0) {
+        if (!errand) {
             return res.status(404).json({ error: 'Errand not found' });
         }
 
-        const errand = errandResult.rows[0];
-
-        if (!errand.stripe_payment_intent) {
+        if (!errand.transaction?.stripePaymentIntent) {
             return res.status(400).json({ error: 'No payment to refund' });
         }
 
         // Cancel the payment intent (releases the hold)
-        await stripe.paymentIntents.cancel(errand.stripe_payment_intent);
+        await stripe.paymentIntents.cancel(errand.transaction.stripePaymentIntent);
 
-        await pool.query(`
-            UPDATE transactions SET status = 'REFUNDED', updated_at = NOW() WHERE id = $1
-        `, [errand.transaction_id]);
+        await prisma.transaction.update({
+            where: { id: errand.transaction.id },
+            data: { status: 'REFUNDED' }
+        });
 
         res.json({ message: 'Payment refunded' });
     } catch (error) {
@@ -194,9 +203,10 @@ router.post('/connect-account', authMiddleware, async (req, res) => {
         });
 
         // Save account ID
-        await pool.query(`
-            UPDATE users SET stripe_account_id = $1, updated_at = NOW() WHERE id = $2
-        `, [account.id, req.user.id]);
+        await prisma.user.update({
+            where: { id: req.user.id },
+            data: { stripeAccountId: account.id }
+        });
 
         // Create onboarding link
         const accountLink = await stripe.accountLinks.create({

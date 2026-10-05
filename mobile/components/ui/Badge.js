@@ -1,36 +1,23 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { STATUS_LABELS, RADIUS, SPACING } from '../../constants/config';
+import { Icon } from './Icon';
+import { STATUS_LABELS, COLORS, RADIUS, TYPE } from '../../constants/config';
 
-export const Badge = ({
-    status, // PENDING, ACTIVE, COMPLETED, etc.
-    label, // Custom label
-    color, // Custom color (overrides status color)
-    size = 'md', // sm, md
-}) => {
-    const statusInfo = STATUS_LABELS[status] || {};
-    const displayLabel = label || statusInfo.label || status;
-    const displayColor = color || statusInfo.color || '#666';
-
-    const sizeStyles = {
-        sm: { paddingVertical: 2, paddingHorizontal: 8, fontSize: 10 },
-        md: { paddingVertical: 4, paddingHorizontal: 12, fontSize: 12 },
-    };
+// Grey pill: coloured dot + ink icon + sentence-case label. Colour lives only in the dot
+// (Disputed also colours its label).
+export const Badge = ({ status, label, color, icon, size = 'md' }) => {
+    const info = STATUS_LABELS[status] || {};
+    const dot = color || info.color || COLORS.inkSecondary;
+    const text = label || info.label || status;
+    const glyph = icon || info.icon;
+    const disputed = status === 'DISPUTED';
 
     return (
-        <View
-            style={[
-                styles.badge,
-                {
-                    backgroundColor: `${displayColor}20`,
-                    paddingVertical: sizeStyles[size].paddingVertical,
-                    paddingHorizontal: sizeStyles[size].paddingHorizontal,
-                },
-            ]}
-        >
-            <View style={[styles.dot, { backgroundColor: displayColor }]} />
-            <Text style={[styles.text, { color: displayColor, fontSize: sizeStyles[size].fontSize }]}>
-                {displayLabel}
+        <View style={[styles.badge, size === 'sm' && styles.badgeSm]}>
+            <View style={[styles.dot, { backgroundColor: dot }]} />
+            {glyph ? <Icon name={glyph} size={14} color={disputed ? COLORS.clay : COLORS.ink} /> : null}
+            <Text style={[styles.text, disputed && { color: COLORS.clay }]} numberOfLines={1}>
+                {text}
             </Text>
         </View>
     );
@@ -40,19 +27,17 @@ const styles = StyleSheet.create({
     badge: {
         flexDirection: 'row',
         alignItems: 'center',
-        borderRadius: RADIUS.full,
-        gap: SPACING.xs,
         alignSelf: 'flex-start',
+        gap: 6,
+        backgroundColor: COLORS.surfaceMuted,
+        borderRadius: RADIUS.full,
+        paddingVertical: 6,
+        paddingLeft: 10,
+        paddingRight: 12,
     },
-    dot: {
-        width: 6,
-        height: 6,
-        borderRadius: 3,
-    },
-    text: {
-        fontWeight: '600',
-        textTransform: 'uppercase',
-    },
+    badgeSm: { paddingVertical: 4 },
+    dot: { width: 8, height: 8, borderRadius: 4 },
+    text: { ...TYPE.badge, color: COLORS.ink },
 });
 
 export default Badge;

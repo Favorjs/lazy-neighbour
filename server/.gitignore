@@ -3,3 +3,7 @@ node_modules
 .env
 
 /generated/prisma
+
+# Local SQLite file created by sql-buns fallback
+*.sqlite
+

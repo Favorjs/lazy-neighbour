@@ -1,5 +1,31 @@
 const jwt = require('jsonwebtoken');
-const { pool, getSingleRow, RecordDoesNotExist } = require('../models/db');
+const { prisma } = require('../models/db');
+
+// Map a Prisma user to the shape exposed as req.user
+const toRequestUser = (user) => ({
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    phone: user.phone,
+    avatarUrl: user.avatarUrl,
+    ratingScore: Number(user.ratingScore),
+    karmaPoints: user.karmaPoints,
+    totalEarnings: Number(user.totalEarnings),
+    totalSpent: Number(user.totalSpent),
+    currentRole: user.currentRole,
+    stripeAccountId: user.stripeAccountId,
+    stripeCustomerId: user.stripeCustomerId,
+    isVerified: user.isVerified,
+    walletBalance: Number(user.walletBalance),
+    createdAt: user.createdAt
+});
+
+const USER_SELECT = {
+    id: true, email: true, name: true, phone: true, avatarUrl: true,
+    ratingScore: true, karmaPoints: true, totalEarnings: true, totalSpent: true,
+    currentRole: true, stripeAccountId: true, stripeCustomerId: true,
+    isVerified: true, walletBalance: true, createdAt: true
+};
 
 const authMiddleware = async (req, res, next) => {
     try {
@@ -13,39 +39,16 @@ const authMiddleware = async (req, res, next) => {
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-        // Raw SQL query to find user by ID
-        const result = await pool.query(`
-            SELECT 
-                id, email, name, phone, avatar_url, rating_score, karma_points,
-                total_earnings, total_spent, current_role, stripe_account_id,
-                stripe_customer_id, is_verified, created_at
-            FROM users 
-            WHERE id = $1
-        `, [decoded.userId]);
-
-        const user = result.rows[0];
+        const user = await prisma.user.findUnique({
+            where: { id: decoded.userId },
+            select: USER_SELECT
+        });
 
         if (!user) {
             return res.status(401).json({ error: 'User not found' });
         }
 
-        // Transform snake_case to camelCase for compatibility
-        req.user = {
-            id: user.id,
-            email: user.email,
-            name: user.name,
-            phone: user.phone,
-            avatarUrl: user.avatar_url,
-            ratingScore: parseFloat(user.rating_score),
-            karmaPoints: user.karma_points,
-            totalEarnings: parseFloat(user.total_earnings),
-            totalSpent: parseFloat(user.total_spent),
-            currentRole: user.current_role,
-            stripeAccountId: user.stripe_account_id,
-            stripeCustomerId: user.stripe_customer_id,
-            isVerified: user.is_verified,
-            createdAt: user.created_at
-        };
+        req.user = toRequestUser(user);
         next();
     } catch (error) {
         if (error.name === 'JsonWebTokenError') {
@@ -68,28 +71,13 @@ const optionalAuth = async (req, res, next) => {
             const token = authHeader.split(' ')[1];
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-            const result = await pool.query(`
-                SELECT * FROM users WHERE id = $1
-            `, [decoded.userId]);
+            const user = await prisma.user.findUnique({
+                where: { id: decoded.userId },
+                select: USER_SELECT
+            });
 
-            const user = result.rows[0];
             if (user) {
-                req.user = {
-                    id: user.id,
-                    email: user.email,
-                    name: user.name,
-                    phone: user.phone,
-                    avatarUrl: user.avatar_url,
-                    ratingScore: parseFloat(user.rating_score),
-                    karmaPoints: user.karma_points,
-                    totalEarnings: parseFloat(user.total_earnings),
-                    totalSpent: parseFloat(user.total_spent),
-                    currentRole: user.current_role,
-                    stripeAccountId: user.stripe_account_id,
-                    stripeCustomerId: user.stripe_customer_id,
-                    isVerified: user.is_verified,
-                    createdAt: user.created_at
-                };
+                req.user = toRequestUser(user);
             }
         }
         next();

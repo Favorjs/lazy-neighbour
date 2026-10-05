@@ -56,16 +56,38 @@ class ApiService {
         };
 
         try {
-            const response = await fetch(url, {
-                ...options,
-                headers,
-                body: options.body ? JSON.stringify(options.body) : undefined,
-            });
+            const controller = new AbortController();
+            let timedOut = false;
+            const timeout = setTimeout(() => {
+                timedOut = true;
+                controller.abort();
+            }, 10000);
+
+            let response;
+            try {
+                response = await fetch(url, {
+                    ...options,
+                    headers,
+                    body: options.body ? JSON.stringify(options.body) : undefined,
+                    signal: controller.signal,
+                });
+            } catch (err) {
+                if (timedOut) {
+                    throw new Error(`Cannot reach the server at ${API_URL}. Is it running?`);
+                }
+                throw err;
+            } finally {
+                clearTimeout(timeout);
+            }
 
             const data = await response.json();
 
             if (!response.ok) {
-                throw new Error(data.error || 'Request failed');
+                const err = new Error(data.error || 'Request failed');
+                err.code = data.code;
+                err.data = data;
+                err.status = response.status;
+                throw err;
             }
 
             return data;
@@ -181,6 +203,64 @@ class ApiService {
             method: 'POST',
             body: { content },
         });
+    }
+
+    async deleteAccount(password) {
+        const data = await this.request('/auth/account', { method: 'DELETE', body: { password } });
+        await this.clearAuth();
+        return data;
+    }
+
+    // ============ WALLET ============
+
+    async getWallet() {
+        return this.request('/wallet');
+    }
+
+    async getWalletTransactions() {
+        return this.request('/wallet/transactions');
+    }
+
+    async topUpWallet(amount) {
+        return this.request('/wallet/topup', { method: 'POST', body: { amount } });
+    }
+
+    async withdrawFromWallet(amount, bankAccountId) {
+        return this.request('/wallet/withdraw', { method: 'POST', body: { amount, bankAccountId } });
+    }
+
+    async getBankAccounts() {
+        return this.request('/wallet/bank-accounts');
+    }
+
+    async addBankAccount(account) {
+        return this.request('/wallet/bank-accounts', { method: 'POST', body: account });
+    }
+
+    async setDefaultBankAccount(id) {
+        return this.request(`/wallet/bank-accounts/${id}/default`, { method: 'PATCH' });
+    }
+
+    async removeBankAccount(id) {
+        return this.request(`/wallet/bank-accounts/${id}`, { method: 'DELETE' });
+    }
+
+    // ============ NOTIFICATIONS ============
+
+    async getNotifications() {
+        return this.request('/notifications');
+    }
+
+    async getUnreadNotificationCount() {
+        return this.request('/notifications/unread-count');
+    }
+
+    async markNotificationRead(id) {
+        return this.request(`/notifications/${id}/read`, { method: 'PATCH' });
+    }
+
+    async markAllNotificationsRead() {
+        return this.request('/notifications/read-all', { method: 'PATCH' });
     }
 
     // ============ PAYMENTS ============

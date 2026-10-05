@@ -1,9 +1,19 @@
 const express = require('express');
-const { pool } = require('../models/db');
+const { prisma } = require('../models/db');
 const { authMiddleware } = require('../middleware/authMiddleware');
 const { canUserTransition, getValidNextStates } = require('../services/errandStateMachine');
+const { applyWalletChange, InsufficientFundsError } = require('../services/walletService');
+const { notify } = require('../services/notificationService');
+
+const naira = (n) => `\u20a6${Number(n).toLocaleString('en-NG')}`;
 
 const router = express.Router();
+
+// Smallest bounty, in naira (keep in sync with MIN_BOUNTY in the mobile app)
+const MIN_BOUNTY = parseFloat(process.env.MIN_BOUNTY) || 100;
+
+const VALID_CATEGORIES = ['FOOD', 'STORE', 'HOME', 'QUICK'];
+const VALID_STATUSES = ['PENDING', 'ACTIVE', 'COMPLETED', 'RELEASED', 'DISPUTED', 'CANCELLED'];
 
 // Calculate distance between two points (Haversine formula)
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
@@ -24,41 +34,78 @@ const calculateServiceFee = (bountyAmount) => {
     return Math.round(bountyAmount * feePercent) / 100;
 };
 
-// Helper to transform errand row to camelCase
-const transformErrand = (row) => ({
-    id: row.id,
-    title: row.title,
-    description: row.description,
-    category: row.category,
-    bountyAmount: parseFloat(row.bounty_amount),
-    serviceFee: parseFloat(row.service_fee),
-    status: row.status,
-    locationLat: parseFloat(row.location_lat),
-    locationLng: parseFloat(row.location_lng),
-    address: row.address,
-    proofPhotoUrl: row.proof_photo_url,
-    requesterId: row.requester_id,
-    runnerId: row.runner_id,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    acceptedAt: row.accepted_at,
-    completedAt: row.completed_at,
-    releasedAt: row.released_at,
-    // Nested requester if present
-    requester: row.requester_name ? {
-        id: row.requester_id,
-        name: row.requester_name,
-        avatarUrl: row.requester_avatar_url,
-        ratingScore: row.requester_rating_score ? parseFloat(row.requester_rating_score) : null
-    } : undefined,
-    // Nested runner if present
-    runner: row.runner_name ? {
-        id: row.runner_id,
-        name: row.runner_name,
-        avatarUrl: row.runner_avatar_url,
-        ratingScore: row.runner_rating_score ? parseFloat(row.runner_rating_score) : null
-    } : undefined
+// Relation selects shared by the queries below
+const USER_BRIEF = { id: true, name: true, avatarUrl: true, ratingScore: true };
+const USER_WITH_PHONE = { ...USER_BRIEF, phone: true };
+const WITH_USERS = {
+    requester: { select: USER_BRIEF },
+    runner: { select: USER_BRIEF }
+};
+
+const transformUser = (user) => user ? {
+    id: user.id,
+    name: user.name,
+    avatarUrl: user.avatarUrl,
+    ratingScore: user.ratingScore != null ? Number(user.ratingScore) : null
+} : undefined;
+
+const transformTransaction = (t) => t ? {
+    id: t.id,
+    stripePaymentIntent: t.stripePaymentIntent,
+    stripeTransferId: t.stripeTransferId,
+    amount: Number(t.amount),
+    serviceFee: Number(t.serviceFee),
+    runnerPayout: Number(t.runnerPayout),
+    status: t.status
+} : undefined;
+
+// Helper to transform a Prisma errand (optionally with requester/runner) to the API shape
+const transformErrand = (e) => ({
+    id: e.id,
+    title: e.title,
+    description: e.description,
+    category: e.category,
+    bountyAmount: Number(e.bountyAmount),
+    serviceFee: Number(e.serviceFee),
+    status: e.status,
+    locationLat: Number(e.locationLat),
+    locationLng: Number(e.locationLng),
+    address: e.address,
+    proofPhotoUrl: e.proofPhotoUrl,
+    requesterId: e.requesterId,
+    runnerId: e.runnerId,
+    createdAt: e.createdAt,
+    updatedAt: e.updatedAt,
+    acceptedAt: e.acceptedAt,
+    completedAt: e.completedAt,
+    releasedAt: e.releasedAt,
+    requester: transformUser(e.requester),
+    runner: transformUser(e.runner)
 });
+
+class AlreadyChangedError extends Error {}
+
+// Move an errand to a new status only if it is still in `from`; throws if another request got there first
+const moveStatus = async (tx, id, from, data) => {
+    const { count } = await tx.errand.updateMany({ where: { id, status: from }, data });
+    if (count !== 1) throw new AlreadyChangedError();
+};
+
+// Look up an errand and run the state-machine permission check for a transition
+const loadForTransition = async (req, newStatus) => {
+    const errand = await prisma.errand.findUnique({ where: { id: req.params.id } });
+
+    if (!errand) {
+        return { status: 404, error: 'Errand not found' };
+    }
+
+    const canTransition = canUserTransition(req.user, errand, newStatus);
+    if (!canTransition.allowed) {
+        return { status: 403, error: canTransition.reason };
+    }
+
+    return { errand };
+};
 
 // POST /api/errands - Create new errand (Lazy user)
 router.post('/', authMiddleware, async (req, res) => {
@@ -72,42 +119,48 @@ router.post('/', authMiddleware, async (req, res) => {
             });
         }
 
-        if (bountyAmount < 1) {
-            return res.status(400).json({ error: 'Bounty must be at least $1' });
+        if (bountyAmount < MIN_BOUNTY) {
+            return res.status(400).json({ error: `Bounty must be at least ₦${MIN_BOUNTY}` });
         }
 
-        const validCategories = ['FOOD', 'STORE', 'HOME', 'QUICK'];
-        if (!validCategories.includes(category.toUpperCase())) {
+        if (!VALID_CATEGORIES.includes(category.toUpperCase())) {
             return res.status(400).json({
-                error: `Category must be one of: ${validCategories.join(', ')}`
+                error: `Category must be one of: ${VALID_CATEGORIES.join(', ')}`
             });
         }
 
         const serviceFee = calculateServiceFee(bountyAmount);
 
-        // Create errand with raw SQL
-        const result = await pool.query(`
-            INSERT INTO errands (title, description, category, bounty_amount, service_fee, location_lat, location_lng, address, requester_id, status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'PENDING')
-            RETURNING *
-        `, [title, description, category.toUpperCase(), parseFloat(bountyAmount), serviceFee, parseFloat(locationLat), parseFloat(locationLng), address || null, req.user.id]);
+        // Create the errand and hold bounty + fee from the wallet in one go (escrow)
+        const total = parseFloat(bountyAmount) + serviceFee;
 
-        const errandRow = result.rows[0];
+        const row = await prisma.$transaction(async (tx) => {
+            const created = await tx.errand.create({
+                data: {
+                    title,
+                    description,
+                    category: category.toUpperCase(),
+                    bountyAmount: parseFloat(bountyAmount),
+                    serviceFee,
+                    locationLat: parseFloat(locationLat),
+                    locationLng: parseFloat(locationLng),
+                    address: address || null,
+                    requesterId: req.user.id,
+                    status: 'PENDING'
+                },
+                include: { requester: { select: USER_BRIEF } }
+            });
 
-        // Get requester info
-        const userResult = await pool.query(`
-            SELECT id, name, avatar_url, rating_score FROM users WHERE id = $1
-        `, [req.user.id]);
+            await applyWalletChange(tx, req.user.id, -total, {
+                type: 'ESCROW_HOLD',
+                description: `Held for "${created.title}"`,
+                errandId: created.id
+            });
 
-        const errand = {
-            ...transformErrand(errandRow),
-            requester: {
-                id: userResult.rows[0].id,
-                name: userResult.rows[0].name,
-                avatarUrl: userResult.rows[0].avatar_url,
-                ratingScore: parseFloat(userResult.rows[0].rating_score)
-            }
-        };
+            return created;
+        });
+
+        const errand = transformErrand(row);
 
         // Emit to nearby runners via Socket.io
         const io = req.app.get('io');
@@ -120,6 +173,14 @@ router.post('/', authMiddleware, async (req, res) => {
             errand
         });
     } catch (error) {
+        if (error instanceof InsufficientFundsError) {
+            return res.status(402).json({
+                code: 'INSUFFICIENT_FUNDS',
+                error: `Add ${naira(Math.ceil(error.required - error.balance))} to your wallet to send this errand`,
+                balance: error.balance,
+                required: error.required
+            });
+        }
         console.error('Create errand error:', error);
         res.status(500).json({ error: 'Failed to create errand' });
     }
@@ -134,31 +195,29 @@ router.get('/nearby', authMiddleware, async (req, res) => {
             return res.status(400).json({ error: 'Location (lat, lng) is required' });
         }
 
+        if (category && !VALID_CATEGORIES.includes(category.toUpperCase())) {
+            return res.status(400).json({
+                error: `Category must be one of: ${VALID_CATEGORIES.join(', ')}`
+            });
+        }
+
         const userLat = parseFloat(lat);
         const userLng = parseFloat(lng);
         const radius = parseFloat(radiusKm);
 
         // Get all pending errands not created by this user
-        let query = `
-            SELECT e.*, 
-                   u.name as requester_name, u.avatar_url as requester_avatar_url, u.rating_score as requester_rating_score
-            FROM errands e
-            JOIN users u ON e.requester_id = u.id
-            WHERE e.status = 'PENDING' AND e.requester_id != $1
-        `;
-        const params = [req.user.id];
-
-        if (category) {
-            query += ` AND e.category = $2`;
-            params.push(category.toUpperCase());
-        }
-
-        query += ` ORDER BY e.created_at DESC`;
-
-        const result = await pool.query(query, params);
+        const rows = await prisma.errand.findMany({
+            where: {
+                status: 'PENDING',
+                requesterId: { not: req.user.id },
+                ...(category && { category: category.toUpperCase() })
+            },
+            include: { requester: { select: USER_BRIEF } },
+            orderBy: { createdAt: 'desc' }
+        });
 
         // Filter by distance
-        const nearbyErrands = result.rows
+        const nearbyErrands = rows
             .map(row => {
                 const errand = transformErrand(row);
                 const distance = calculateDistance(
@@ -185,44 +244,39 @@ router.get('/nearby', authMiddleware, async (req, res) => {
 router.get('/feed', authMiddleware, async (req, res) => {
     try {
         const { page = 1, limit = 20, category } = req.query;
-        const offset = (parseInt(page) - 1) * parseInt(limit);
+        const pageNum = parseInt(page);
+        const limitNum = parseInt(limit);
 
-        let whereClause = `WHERE e.status IN ('PENDING', 'ACTIVE')`;
-        const params = [];
-        let paramCount = 1;
-
-        if (category) {
-            whereClause += ` AND e.category = $${paramCount++}`;
-            params.push(category.toUpperCase());
+        if (category && !VALID_CATEGORIES.includes(category.toUpperCase())) {
+            return res.status(400).json({
+                error: `Category must be one of: ${VALID_CATEGORIES.join(', ')}`
+            });
         }
 
-        // Get errands with requester and runner info
-        const errandsResult = await pool.query(`
-            SELECT e.*,
-                   req.name as requester_name, req.avatar_url as requester_avatar_url, req.rating_score as requester_rating_score,
-                   run.name as runner_name, run.avatar_url as runner_avatar_url
-            FROM errands e
-            JOIN users req ON e.requester_id = req.id
-            LEFT JOIN users run ON e.runner_id = run.id
-            ${whereClause}
-            ORDER BY e.created_at DESC
-            LIMIT $${paramCount++} OFFSET $${paramCount}
-        `, [...params, parseInt(limit), offset]);
+        const where = {
+            status: { in: ['PENDING', 'ACTIVE'] },
+            ...(category && { category: category.toUpperCase() })
+        };
 
-        // Get total count
-        const countResult = await pool.query(`
-            SELECT COUNT(*) as count FROM errands e ${whereClause}
-        `, params);
-
-        const total = parseInt(countResult.rows[0].count);
+        // Get errands with requester and runner info, plus the total count
+        const [rows, total] = await Promise.all([
+            prisma.errand.findMany({
+                where,
+                include: WITH_USERS,
+                orderBy: { createdAt: 'desc' },
+                skip: (pageNum - 1) * limitNum,
+                take: limitNum
+            }),
+            prisma.errand.count({ where })
+        ]);
 
         res.json({
-            errands: errandsResult.rows.map(transformErrand),
+            errands: rows.map(transformErrand),
             pagination: {
-                page: parseInt(page),
-                limit: parseInt(limit),
+                page: pageNum,
+                limit: limitNum,
                 total,
-                pages: Math.ceil(total / parseInt(limit))
+                pages: Math.ceil(total / limitNum)
             }
         });
     } catch (error) {
@@ -236,48 +290,34 @@ router.get('/my', authMiddleware, async (req, res) => {
     try {
         const { role, status } = req.query;
 
-        let whereClause = '';
-        const params = [req.user.id];
+        if (status && !VALID_STATUSES.includes(status.toUpperCase())) {
+            return res.status(400).json({
+                error: `Status must be one of: ${VALID_STATUSES.join(', ')}`
+            });
+        }
 
+        let roleFilter;
         if (role === 'lazy' || role === 'requester') {
-            whereClause = `WHERE e.requester_id = $1`;
+            roleFilter = { requesterId: req.user.id };
         } else if (role === 'runner') {
-            whereClause = `WHERE e.runner_id = $1`;
+            roleFilter = { runnerId: req.user.id };
         } else {
-            whereClause = `WHERE (e.requester_id = $1 OR e.runner_id = $1)`;
+            roleFilter = { OR: [{ requesterId: req.user.id }, { runnerId: req.user.id }] };
         }
 
-        if (status) {
-            whereClause += ` AND e.status = $2`;
-            params.push(status.toUpperCase());
-        }
+        const rows = await prisma.errand.findMany({
+            where: {
+                ...roleFilter,
+                ...(status && { status: status.toUpperCase() })
+            },
+            include: { ...WITH_USERS, transaction: true },
+            orderBy: { createdAt: 'desc' }
+        });
 
-        const result = await pool.query(`
-            SELECT e.*,
-                   req.name as requester_name, req.avatar_url as requester_avatar_url, req.rating_score as requester_rating_score,
-                   run.name as runner_name, run.avatar_url as runner_avatar_url, run.rating_score as runner_rating_score,
-                   t.id as transaction_id, t.stripe_payment_intent, t.stripe_transfer_id, t.amount as transaction_amount, 
-                   t.service_fee as transaction_service_fee, t.runner_payout, t.status as transaction_status
-            FROM errands e
-            JOIN users req ON e.requester_id = req.id
-            LEFT JOIN users run ON e.runner_id = run.id
-            LEFT JOIN transactions t ON t.errand_id = e.id
-            ${whereClause}
-            ORDER BY e.created_at DESC
-        `, params);
-
-        const errands = result.rows.map(row => {
+        const errands = rows.map(row => {
             const errand = transformErrand(row);
-            if (row.transaction_id) {
-                errand.transaction = {
-                    id: row.transaction_id,
-                    stripePaymentIntent: row.stripe_payment_intent,
-                    stripeTransferId: row.stripe_transfer_id,
-                    amount: parseFloat(row.transaction_amount),
-                    serviceFee: parseFloat(row.transaction_service_fee),
-                    runnerPayout: parseFloat(row.runner_payout),
-                    status: row.transaction_status
-                };
+            if (row.transaction) {
+                errand.transaction = transformTransaction(row.transaction);
             }
             return errand;
         });
@@ -292,63 +332,45 @@ router.get('/my', authMiddleware, async (req, res) => {
 // GET /api/errands/:id - Get single errand
 router.get('/:id', authMiddleware, async (req, res) => {
     try {
-        // Get errand with requester, runner, and transaction
-        const errandResult = await pool.query(`
-            SELECT e.*,
-                   req.name as requester_name, req.avatar_url as requester_avatar_url, req.rating_score as requester_rating_score, req.phone as requester_phone,
-                   run.name as runner_name, run.avatar_url as runner_avatar_url, run.rating_score as runner_rating_score, run.phone as runner_phone,
-                   t.id as transaction_id, t.stripe_payment_intent, t.stripe_transfer_id, t.amount as transaction_amount,
-                   t.service_fee as transaction_service_fee, t.runner_payout, t.status as transaction_status
-            FROM errands e
-            JOIN users req ON e.requester_id = req.id
-            LEFT JOIN users run ON e.runner_id = run.id
-            LEFT JOIN transactions t ON t.errand_id = e.id
-            WHERE e.id = $1
-        `, [req.params.id]);
+        // Get errand with requester, runner, transaction and messages
+        const row = await prisma.errand.findUnique({
+            where: { id: req.params.id },
+            include: {
+                requester: { select: USER_WITH_PHONE },
+                runner: { select: USER_WITH_PHONE },
+                transaction: true,
+                messages: {
+                    orderBy: { createdAt: 'asc' },
+                    take: 50,
+                    include: { sender: { select: { id: true, name: true, avatarUrl: true } } }
+                }
+            }
+        });
 
-        if (errandResult.rows.length === 0) {
+        if (!row) {
             return res.status(404).json({ error: 'Errand not found' });
         }
 
-        const row = errandResult.rows[0];
         const errand = transformErrand(row);
 
         // Add phone numbers to requester/runner
-        if (errand.requester) errand.requester.phone = row.requester_phone;
-        if (errand.runner) errand.runner.phone = row.runner_phone;
+        if (errand.requester) errand.requester.phone = row.requester.phone;
+        if (errand.runner) errand.runner.phone = row.runner.phone;
 
         // Add transaction if exists
-        if (row.transaction_id) {
-            errand.transaction = {
-                id: row.transaction_id,
-                stripePaymentIntent: row.stripe_payment_intent,
-                stripeTransferId: row.stripe_transfer_id,
-                amount: parseFloat(row.transaction_amount),
-                serviceFee: parseFloat(row.transaction_service_fee),
-                runnerPayout: parseFloat(row.runner_payout),
-                status: row.transaction_status
-            };
+        if (row.transaction) {
+            errand.transaction = transformTransaction(row.transaction);
         }
 
-        // Get messages
-        const messagesResult = await pool.query(`
-            SELECT m.*, s.name as sender_name, s.avatar_url as sender_avatar_url
-            FROM messages m
-            JOIN users s ON m.sender_id = s.id
-            WHERE m.errand_id = $1
-            ORDER BY m.created_at ASC
-            LIMIT 50
-        `, [req.params.id]);
-
-        errand.messages = messagesResult.rows.map(m => ({
+        errand.messages = row.messages.map(m => ({
             id: m.id,
             content: m.content,
-            isRead: m.is_read,
-            createdAt: m.created_at,
+            isRead: m.isRead,
+            createdAt: m.createdAt,
             sender: {
-                id: m.sender_id,
-                name: m.sender_name,
-                avatarUrl: m.sender_avatar_url
+                id: m.sender.id,
+                name: m.sender.name,
+                avatarUrl: m.sender.avatarUrl
             }
         }));
 
@@ -368,51 +390,37 @@ router.get('/:id', authMiddleware, async (req, res) => {
 // POST /api/errands/:id/accept - Accept errand (Runner)
 router.post('/:id/accept', authMiddleware, async (req, res) => {
     try {
-        const errandResult = await pool.query(`SELECT * FROM errands WHERE id = $1`, [req.params.id]);
-
-        if (errandResult.rows.length === 0) {
-            return res.status(404).json({ error: 'Errand not found' });
+        const loaded = await loadForTransition(req, 'ACTIVE');
+        if (loaded.error) {
+            return res.status(loaded.status).json({ error: loaded.error });
         }
+        const { errand } = loaded;
 
-        const errandRow = errandResult.rows[0];
-        const errand = {
-            status: errandRow.status,
-            requesterId: errandRow.requester_id,
-            runnerId: errandRow.runner_id
-        };
+        // Update errand and get it back with users
+        const row = await prisma.errand.update({
+            where: { id: req.params.id },
+            data: {
+                status: 'ACTIVE',
+                runnerId: req.user.id,
+                acceptedAt: new Date()
+            },
+            include: WITH_USERS
+        });
 
-        // Check permissions
-        const canTransition = canUserTransition(req.user, errand, 'ACTIVE');
-        if (!canTransition.allowed) {
-            return res.status(403).json({ error: canTransition.reason });
-        }
-
-        // Update errand
-        const updateResult = await pool.query(`
-            UPDATE errands 
-            SET status = 'ACTIVE', runner_id = $1, accepted_at = NOW(), updated_at = NOW()
-            WHERE id = $2
-            RETURNING *
-        `, [req.user.id, req.params.id]);
-
-        // Get full errand with users
-        const fullResult = await pool.query(`
-            SELECT e.*,
-                   req.name as requester_name, req.avatar_url as requester_avatar_url,
-                   run.name as runner_name, run.avatar_url as runner_avatar_url
-            FROM errands e
-            JOIN users req ON e.requester_id = req.id
-            LEFT JOIN users run ON e.runner_id = run.id
-            WHERE e.id = $1
-        `, [req.params.id]);
-
-        const updatedErrand = transformErrand(fullResult.rows[0]);
+        const updatedErrand = transformErrand(row);
 
         // Notify requester via Socket.io
         const io = req.app.get('io');
         if (io) {
-            io.to(`user-${errandRow.requester_id}`).emit('errand-accepted', updatedErrand);
+            io.to(`user-${errand.requesterId}`).emit('errand-accepted', updatedErrand);
         }
+
+        notify(io, errand.requesterId, {
+            type: 'ERRAND_ACCEPTED',
+            title: `${req.user.name} picked up your errand`,
+            body: `"${updatedErrand.title}" is on its way.`,
+            errandId: errand.id
+        });
 
         res.json({
             message: 'Errand accepted! 🏃 Get moving!',
@@ -429,50 +437,36 @@ router.post('/:id/complete', authMiddleware, async (req, res) => {
     try {
         const { proofPhotoUrl } = req.body;
 
-        const errandResult = await pool.query(`SELECT * FROM errands WHERE id = $1`, [req.params.id]);
-
-        if (errandResult.rows.length === 0) {
-            return res.status(404).json({ error: 'Errand not found' });
+        const loaded = await loadForTransition(req, 'COMPLETED');
+        if (loaded.error) {
+            return res.status(loaded.status).json({ error: loaded.error });
         }
+        const { errand } = loaded;
 
-        const errandRow = errandResult.rows[0];
-        const errand = {
-            status: errandRow.status,
-            requesterId: errandRow.requester_id,
-            runnerId: errandRow.runner_id
-        };
+        const row = await prisma.errand.update({
+            where: { id: req.params.id },
+            data: {
+                status: 'COMPLETED',
+                proofPhotoUrl: proofPhotoUrl || null,
+                completedAt: new Date()
+            },
+            include: WITH_USERS
+        });
 
-        // Check permissions
-        const canTransition = canUserTransition(req.user, errand, 'COMPLETED');
-        if (!canTransition.allowed) {
-            return res.status(403).json({ error: canTransition.reason });
-        }
-
-        // Update errand
-        await pool.query(`
-            UPDATE errands 
-            SET status = 'COMPLETED', proof_photo_url = $1, completed_at = NOW(), updated_at = NOW()
-            WHERE id = $2
-        `, [proofPhotoUrl || null, req.params.id]);
-
-        // Get full errand with users
-        const fullResult = await pool.query(`
-            SELECT e.*,
-                   req.name as requester_name, req.avatar_url as requester_avatar_url,
-                   run.name as runner_name, run.avatar_url as runner_avatar_url
-            FROM errands e
-            JOIN users req ON e.requester_id = req.id
-            LEFT JOIN users run ON e.runner_id = run.id
-            WHERE e.id = $1
-        `, [req.params.id]);
-
-        const updatedErrand = transformErrand(fullResult.rows[0]);
+        const updatedErrand = transformErrand(row);
 
         // Notify requester
         const io = req.app.get('io');
         if (io) {
-            io.to(`user-${errandRow.requester_id}`).emit('errand-completed', updatedErrand);
+            io.to(`user-${errand.requesterId}`).emit('errand-completed', updatedErrand);
         }
+
+        notify(io, errand.requesterId, {
+            type: 'ERRAND_COMPLETED',
+            title: 'Your errand is done',
+            body: `"${updatedErrand.title}" is finished. Release payment when you are happy.`,
+            errandId: errand.id
+        });
 
         res.json({
             message: 'Errand marked as complete! ✅ Waiting for approval...',
@@ -487,97 +481,72 @@ router.post('/:id/complete', authMiddleware, async (req, res) => {
 // POST /api/errands/:id/release - Release funds (Lazy user)
 router.post('/:id/release', authMiddleware, async (req, res) => {
     try {
-        // Get errand with transaction
-        const errandResult = await pool.query(`
-            SELECT e.*, t.id as transaction_id
-            FROM errands e
-            LEFT JOIN transactions t ON t.errand_id = e.id
-            WHERE e.id = $1
-        `, [req.params.id]);
-
-        if (errandResult.rows.length === 0) {
-            return res.status(404).json({ error: 'Errand not found' });
+        const loaded = await loadForTransition(req, 'RELEASED');
+        if (loaded.error) {
+            return res.status(loaded.status).json({ error: loaded.error });
         }
+        const { errand } = loaded;
 
-        const errandRow = errandResult.rows[0];
-        const errand = {
-            status: errandRow.status,
-            requesterId: errandRow.requester_id,
-            runnerId: errandRow.runner_id
-        };
+        const bounty = Number(errand.bountyAmount);
+        const serviceFee = Number(errand.serviceFee);
+        const now = new Date();
 
-        // Check permissions
-        const canTransition = canUserTransition(req.user, errand, 'RELEASED');
-        if (!canTransition.allowed) {
-            return res.status(403).json({ error: canTransition.reason });
-        }
+        // Update the errand, both users' stats and the runner's wallet in ONE transaction.
+        // The service fee stays with Lazy Neighbour; the bounty goes to the runner's wallet.
+        const row = await prisma.$transaction(async (tx) => {
+            await moveStatus(tx, errand.id, errand.status, { status: 'RELEASED', releasedAt: now });
+            const released = await tx.errand.findUnique({ where: { id: errand.id }, include: WITH_USERS });
 
-        // Start a transaction for multiple updates
-        const client = await pool.connect();
-        try {
-            await client.query('BEGIN');
+            await tx.user.update({
+                where: { id: errand.runnerId },
+                data: { totalEarnings: { increment: bounty }, karmaPoints: { increment: 10 } }
+            });
 
-            // Update errand status
-            await client.query(`
-                UPDATE errands SET status = 'RELEASED', released_at = NOW(), updated_at = NOW() WHERE id = $1
-            `, [req.params.id]);
+            await tx.user.update({
+                where: { id: errand.requesterId },
+                data: { totalSpent: { increment: bounty + serviceFee }, karmaPoints: { increment: 5 } }
+            });
 
-            // Update runner's earnings and karma
-            await client.query(`
-                UPDATE users 
-                SET total_earnings = total_earnings + $1, karma_points = karma_points + 10, updated_at = NOW()
-                WHERE id = $2
-            `, [parseFloat(errandRow.bounty_amount), errandRow.runner_id]);
+            await tx.transaction.updateMany({
+                where: { errandId: errand.id },
+                data: { status: 'RELEASED', updatedAt: now }
+            });
 
-            // Update requester's spending
-            await client.query(`
-                UPDATE users 
-                SET total_spent = total_spent + $1, karma_points = karma_points + 5, updated_at = NOW()
-                WHERE id = $2
-            `, [parseFloat(errandRow.bounty_amount) + parseFloat(errandRow.service_fee), errandRow.requester_id]);
+            await applyWalletChange(tx, errand.runnerId, bounty, {
+                type: 'EARNING',
+                description: `Paid for "${errand.title}"`,
+                errandId: errand.id
+            });
 
-            // Update transaction status if exists
-            if (errandRow.transaction_id) {
-                await client.query(`
-                    UPDATE transactions SET status = 'RELEASED', updated_at = NOW() WHERE id = $1
-                `, [errandRow.transaction_id]);
-            }
+            return released;
+        });
 
-            await client.query('COMMIT');
-        } catch (err) {
-            await client.query('ROLLBACK');
-            throw err;
-        } finally {
-            client.release();
-        }
-
-        // Get updated errand
-        const fullResult = await pool.query(`
-            SELECT e.*,
-                   req.id as requester_id, req.name as requester_name,
-                   run.id as runner_id, run.name as runner_name
-            FROM errands e
-            JOIN users req ON e.requester_id = req.id
-            LEFT JOIN users run ON e.runner_id = run.id
-            WHERE e.id = $1
-        `, [req.params.id]);
-
-        const updatedErrand = transformErrand(fullResult.rows[0]);
+        const updatedErrand = transformErrand(row);
 
         // Notify runner
         const io = req.app.get('io');
         if (io) {
-            io.to(`user-${errandRow.runner_id}`).emit('payment-released', {
+            io.to(`user-${errand.runnerId}`).emit('payment-released', {
                 errand: updatedErrand,
-                amount: parseFloat(errandRow.bounty_amount)
+                amount: bounty
             });
         }
 
+        notify(io, errand.runnerId, {
+            type: 'PAYMENT_RECEIVED',
+            title: `You earned ${naira(bounty)}`,
+            body: `It is in your wallet for "${errand.title}".`,
+            errandId: errand.id
+        });
+
         res.json({
-            message: `Payment of $${errandRow.bounty_amount} released! 💰`,
+            message: `Payment of ₦${errand.bountyAmount} released!`,
             errand: updatedErrand
         });
     } catch (error) {
+        if (error instanceof AlreadyChangedError) {
+            return res.status(409).json({ error: 'This errand was just updated. Pull to refresh and try again.' });
+        }
         console.error('Release funds error:', error);
         res.status(500).json({ error: 'Failed to release funds' });
     }
@@ -586,37 +555,36 @@ router.post('/:id/release', authMiddleware, async (req, res) => {
 // POST /api/errands/:id/cancel - Cancel errand (Lazy user, only if PENDING)
 router.post('/:id/cancel', authMiddleware, async (req, res) => {
     try {
-        const errandResult = await pool.query(`SELECT * FROM errands WHERE id = $1`, [req.params.id]);
-
-        if (errandResult.rows.length === 0) {
-            return res.status(404).json({ error: 'Errand not found' });
+        const loaded = await loadForTransition(req, 'CANCELLED');
+        if (loaded.error) {
+            return res.status(loaded.status).json({ error: loaded.error });
         }
 
-        const errandRow = errandResult.rows[0];
-        const errand = {
-            status: errandRow.status,
-            requesterId: errandRow.requester_id,
-            runnerId: errandRow.runner_id
-        };
+        const { errand } = loaded;
+        const refund = Number(errand.bountyAmount) + Number(errand.serviceFee);
 
-        // Check permissions
-        const canTransition = canUserTransition(req.user, errand, 'CANCELLED');
-        if (!canTransition.allowed) {
-            return res.status(403).json({ error: canTransition.reason });
-        }
+        // Cancel and give the held money back in one go (only PENDING errands can be cancelled by the requester)
+        const updated = await prisma.$transaction(async (tx) => {
+            await moveStatus(tx, errand.id, errand.status, { status: 'CANCELLED' });
+            const row = await tx.errand.findUnique({ where: { id: errand.id } });
 
-        await pool.query(`
-            UPDATE errands SET status = 'CANCELLED', updated_at = NOW() WHERE id = $1
-        `, [req.params.id]);
+            await applyWalletChange(tx, errand.requesterId, refund, {
+                type: 'ESCROW_REFUND',
+                description: `Refund for "${errand.title}"`,
+                errandId: errand.id
+            });
 
-        const updatedResult = await pool.query(`SELECT * FROM errands WHERE id = $1`, [req.params.id]);
-        const updatedErrand = transformErrand(updatedResult.rows[0]);
+            return row;
+        });
 
         res.json({
-            message: 'Errand cancelled',
-            errand: updatedErrand
+            message: 'Errand cancelled and your money is back in your wallet',
+            errand: transformErrand(updated)
         });
     } catch (error) {
+        if (error instanceof AlreadyChangedError) {
+            return res.status(409).json({ error: 'This errand was just updated. Pull to refresh and try again.' });
+        }
         console.error('Cancel errand error:', error);
         res.status(500).json({ error: 'Failed to cancel errand' });
     }
@@ -625,37 +593,19 @@ router.post('/:id/cancel', authMiddleware, async (req, res) => {
 // POST /api/errands/:id/dispute - Flag errand as disputed
 router.post('/:id/dispute', authMiddleware, async (req, res) => {
     try {
-        const { reason } = req.body;
-
-        const errandResult = await pool.query(`SELECT * FROM errands WHERE id = $1`, [req.params.id]);
-
-        if (errandResult.rows.length === 0) {
-            return res.status(404).json({ error: 'Errand not found' });
+        const loaded = await loadForTransition(req, 'DISPUTED');
+        if (loaded.error) {
+            return res.status(loaded.status).json({ error: loaded.error });
         }
 
-        const errandRow = errandResult.rows[0];
-        const errand = {
-            status: errandRow.status,
-            requesterId: errandRow.requester_id,
-            runnerId: errandRow.runner_id
-        };
-
-        // Check permissions
-        const canTransition = canUserTransition(req.user, errand, 'DISPUTED');
-        if (!canTransition.allowed) {
-            return res.status(403).json({ error: canTransition.reason });
-        }
-
-        await pool.query(`
-            UPDATE errands SET status = 'DISPUTED', updated_at = NOW() WHERE id = $1
-        `, [req.params.id]);
-
-        const updatedResult = await pool.query(`SELECT * FROM errands WHERE id = $1`, [req.params.id]);
-        const updatedErrand = transformErrand(updatedResult.rows[0]);
+        const updated = await prisma.errand.update({
+            where: { id: req.params.id },
+            data: { status: 'DISPUTED' }
+        });
 
         res.json({
             message: 'Errand flagged for review. Our team will investigate.',
-            errand: updatedErrand
+            errand: transformErrand(updated)
         });
     } catch (error) {
         console.error('Dispute errand error:', error);

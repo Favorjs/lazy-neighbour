@@ -101,8 +101,8 @@ const canUserTransition = (user, errand, newStatus) => {
 
         case 'DISPUTED->RELEASED':
         case 'DISPUTED->CANCELLED':
-            // Only admin can resolve disputes (TODO: add admin check)
-            return { allowed: true };
+            // Held money is only moved by support, never by either party
+            return { allowed: false, reason: 'Our support team resolves disputes' };
 
         default:
             return { allowed: false, reason: 'Unknown transition' };

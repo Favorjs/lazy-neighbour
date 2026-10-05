@@ -5,14 +5,16 @@ import {
     StyleSheet,
     FlatList,
     RefreshControl,
-    TouchableOpacity,
-    ActivityIndicator,
+    Pressable,
+    ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { ErrandCard } from '../../components/errand/ErrandCard';
-import { COLORS, CATEGORIES, SPACING, RADIUS } from '../../constants/config';
+import { HomeTopBar } from '../../components/home/HomeTopBar';
+import { Button, Icon, Sheet } from '../../components/ui';
+import { HomeHeaderSkeleton, ErrandListSkeleton, Skeleton } from '../../components/ui/Skeleton';
+import { COLORS, CATEGORIES, SPACING, RADIUS, TYPE } from '../../constants/config';
 import api from '../../services/api';
 
 export default function FeedScreen() {
@@ -22,6 +24,8 @@ export default function FeedScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [selectedCategory, setSelectedCategory] = useState(null);
     const [user, setUser] = useState(null);
+    const [acceptingId, setAcceptingId] = useState(null);
+    const [unreadCount, setUnreadCount] = useState(0);
 
     const fetchFeed = async () => {
         try {
@@ -43,112 +47,143 @@ export default function FeedScreen() {
         fetchFeed();
     }, [selectedCategory]);
 
+    // Refresh the bell's unread count every time Home comes back into view
+    useFocusEffect(
+        useCallback(() => {
+            api.getUnreadNotificationCount()
+                .then((d) => setUnreadCount(d.unreadCount || 0))
+                .catch(() => { });
+        }, [])
+    );
+
     const onRefresh = useCallback(() => {
         setRefreshing(true);
         fetchFeed();
     }, [selectedCategory]);
 
-    const handleErrandPress = (errand) => {
-        router.push(`/errand/${errand.id}`);
+    const openErrand = (errand) => router.push(`/errand/${errand.id}`);
+
+    const acceptErrand = async (errand) => {
+        setAcceptingId(errand.id);
+        try {
+            await api.acceptErrand(errand.id);
+            router.push(`/errand/${errand.id}`);
+        } catch (error) {
+            Sheet.alert('Could not accept', error.message || 'Please try again');
+        } finally {
+            setAcceptingId(null);
+        }
     };
 
-    const CategoryFilter = () => (
-        <View style={styles.categoryFilter}>
-            <TouchableOpacity
-                style={[
-                    styles.filterChip,
-                    !selectedCategory && styles.filterChipActive,
-                ]}
-                onPress={() => setSelectedCategory(null)}
-            >
-                <Text style={[styles.filterText, !selectedCategory && styles.filterTextActive]}>
-                    All
-                </Text>
-            </TouchableOpacity>
-            {Object.entries(CATEGORIES).map(([key, cat]) => (
-                <TouchableOpacity
-                    key={key}
-                    style={[
-                        styles.filterChip,
-                        selectedCategory === key && { backgroundColor: `${cat.color}20`, borderColor: cat.color },
-                    ]}
-                    onPress={() => setSelectedCategory(selectedCategory === key ? null : key)}
-                >
-                    <Text style={styles.filterIcon}>{cat.icon}</Text>
-                    <Text
-                        style={[
-                            styles.filterText,
-                            selectedCategory === key && { color: cat.color },
-                        ]}
-                    >
-                        {cat.label.split(' ')[0]}
-                    </Text>
-                </TouchableOpacity>
-            ))}
-        </View>
+    const firstName = user?.name?.split(' ')[0];
+
+    // The two big actions: Send is the one primary pill, Run sits right under it.
+    const sendCta = (
+        <Button
+            title="Send an errand"
+            variant="primary"
+            block
+            bubbleIcon="Plus"
+            onPress={() => router.push('/post')}
+        />
+    );
+    const runCta = (
+        <Button
+            title="Run errands, get paid"
+            variant="soft"
+            block
+            bubbleIcon="Footprints"
+            onPress={() => router.push('/(tabs)/radar')}
+        />
     );
 
-    const Header = () => (
-        <View style={styles.header}>
-            <View>
-                <Text style={styles.greeting}>
-                    {user?.currentRole === 'RUNNER' ? '🏃 Runner Mode' : '😴 Lazy Mode'}
-                </Text>
-                <Text style={styles.title}>Live Stream</Text>
-                <Text style={styles.subtitle}>What's happening nearby</Text>
+    const Header = (
+        <View>
+            <HomeTopBar
+                unreadCount={unreadCount}
+                onBellPress={() => router.push('/notifications')}
+                onLocationPress={() => router.push('/location')}
+            />
+
+            <View style={styles.hello}>
+                <Text style={styles.greeting}>{firstName ? `Hi, ${firstName}` : 'Welcome'}</Text>
+                <Text style={styles.hero}></Text>
+                <Text style={styles.sub}>.</Text>
             </View>
-            <TouchableOpacity
-                style={styles.postButton}
-                onPress={() => router.push('/post')}
+
+            <View style={styles.ctas}>
+                {sendCta}
+                {runCta}
+            </View>
+
+            <Text style={styles.section}>Around you</Text>
+            <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.chips}
+                style={styles.chipScroll}
             >
-                <LinearGradient
-                    colors={[COLORS.primary, COLORS.primaryDark]}
-                    style={styles.postButtonGradient}
+                <Pressable
+                    style={[styles.chip, !selectedCategory && styles.chipOn]}
+                    onPress={() => setSelectedCategory(null)}
                 >
-                    <Text style={styles.postButtonText}>+</Text>
-                </LinearGradient>
-            </TouchableOpacity>
+                    <Text style={[styles.chipText, !selectedCategory && styles.chipTextOn]}>All</Text>
+                </Pressable>
+                {Object.entries(CATEGORIES).map(([key, cat]) => {
+                    const on = selectedCategory === key;
+                    return (
+                        <Pressable
+                            key={key}
+                            style={[styles.chip, on && styles.chipOn]}
+                            onPress={() => setSelectedCategory(on ? null : key)}
+                        >
+                            <Icon name={cat.icon} size={14} color={on ? COLORS.white : COLORS.ink} />
+                            <Text style={[styles.chipText, on && styles.chipTextOn]}>{cat.label}</Text>
+                        </Pressable>
+                    );
+                })}
+            </ScrollView>
         </View>
     );
 
     if (loading) {
         return (
-            <SafeAreaView style={styles.container}>
-                <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color={COLORS.primary} />
-                    <Text style={styles.loadingText}>Loading feed...</Text>
+            <SafeAreaView style={styles.container} edges={['top']}>
+                <View style={styles.listContent}>
+                    <HomeHeaderSkeleton />
+                    <Skeleton width={120} height={22} style={{ marginTop: SPACING.xl, marginBottom: SPACING.md }} />
+                    <ErrandListSkeleton count={2} />
                 </View>
             </SafeAreaView>
         );
     }
 
     return (
-        <SafeAreaView style={styles.container}>
-            <Header />
-            <CategoryFilter />
-
+        <SafeAreaView style={styles.container} edges={['top']}>
             <FlatList
                 data={errands}
                 keyExtractor={(item) => item.id}
                 renderItem={({ item }) => (
-                    <ErrandCard errand={item} onPress={handleErrandPress} />
+                    <ErrandCard
+                        errand={item}
+                        onPress={openErrand}
+                        onAccept={item.requesterId !== user?.id && item.status === 'PENDING' ? acceptErrand : undefined}
+                        onChat={(e) => router.push(`/chat/${e.id}`)}
+                        currentUserId={user?.id}
+                        acceptLoading={acceptingId === item.id}
+                    />
                 )}
+                ListHeaderComponent={Header}
                 contentContainerStyle={styles.listContent}
                 showsVerticalScrollIndicator={false}
                 refreshControl={
-                    <RefreshControl
-                        refreshing={refreshing}
-                        onRefresh={onRefresh}
-                        tintColor={COLORS.primary}
-                        colors={[COLORS.primary]}
-                    />
+                    <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.ink} />
                 }
                 ListEmptyComponent={
-                    <View style={styles.emptyContainer}>
-                        <Text style={styles.emptyEmoji}>🌙</Text>
-                        <Text style={styles.emptyTitle}>No errands yet</Text>
-                        <Text style={styles.emptySubtitle}>
-                            Be the first to post an errand in your area!
+                    <View style={styles.empty}>
+                        <Text style={styles.emptyTitle}>Quiet around here</Text>
+                        <Text style={styles.emptyText}>
+                            No errands yet. Be the first neighbour to ask for a hand.
                         </Text>
                     </View>
                 }
@@ -158,113 +193,30 @@ export default function FeedScreen() {
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: COLORS.bgDark,
-    },
-    loadingContainer: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: SPACING.md,
-    },
-    loadingText: {
-        color: COLORS.textSecondary,
-        fontSize: 14,
-    },
-    header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        paddingHorizontal: SPACING.lg,
-        paddingVertical: SPACING.md,
-    },
-    greeting: {
-        color: COLORS.primary,
-        fontSize: 12,
-        fontWeight: '600',
-        marginBottom: SPACING.xs,
-    },
-    title: {
-        color: COLORS.textPrimary,
-        fontSize: 28,
-        fontWeight: '800',
-    },
-    subtitle: {
-        color: COLORS.textSecondary,
-        fontSize: 14,
-        marginTop: 2,
-    },
-    postButton: {
-        marginTop: SPACING.sm,
-    },
-    postButtonGradient: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    postButtonText: {
-        color: COLORS.white,
-        fontSize: 28,
-        fontWeight: '300',
-        marginTop: -2,
-    },
-    categoryFilter: {
-        flexDirection: 'row',
-        paddingHorizontal: SPACING.lg,
-        paddingBottom: SPACING.md,
-        gap: SPACING.sm,
-    },
-    filterChip: {
+    container: { flex: 1, backgroundColor: COLORS.surface },
+    center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+    listContent: { paddingHorizontal: SPACING.lg, paddingBottom: SPACING.xl },
+    hello: { paddingTop: SPACING.md, gap: 4 },
+    greeting: { fontFamily: TYPE.heading.fontFamily, fontSize: 24, lineHeight: 32, color: COLORS.ink },
+    hero: { ...TYPE.hero, color: COLORS.ink },
+    sub: { ...TYPE.bodySm, color: COLORS.inkSecondary, marginTop: 4 },
+    ctas: { gap: 12, marginTop: SPACING.lg },
+    section: { ...TYPE.heading, color: COLORS.ink, marginTop: SPACING.xl, marginBottom: SPACING.sm + 2 },
+    chipScroll: { marginHorizontal: -SPACING.lg, marginBottom: SPACING.md },
+    chips: { paddingHorizontal: SPACING.lg, gap: 8 },
+    chip: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: SPACING.sm,
-        paddingHorizontal: SPACING.md,
-        backgroundColor: COLORS.bgCard,
+        gap: 6,
+        backgroundColor: COLORS.surfaceMuted,
         borderRadius: RADIUS.full,
-        borderWidth: 1,
-        borderColor: 'transparent',
-        gap: 4,
+        paddingVertical: 8,
+        paddingHorizontal: 14,
     },
-    filterChipActive: {
-        backgroundColor: `${COLORS.primary}20`,
-        borderColor: COLORS.primary,
-    },
-    filterIcon: {
-        fontSize: 14,
-    },
-    filterText: {
-        color: COLORS.textSecondary,
-        fontSize: 12,
-        fontWeight: '600',
-    },
-    filterTextActive: {
-        color: COLORS.primary,
-    },
-    listContent: {
-        padding: SPACING.lg,
-        paddingTop: 0,
-    },
-    emptyContainer: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: SPACING.xxl * 2,
-    },
-    emptyEmoji: {
-        fontSize: 64,
-        marginBottom: SPACING.md,
-    },
-    emptyTitle: {
-        color: COLORS.textPrimary,
-        fontSize: 20,
-        fontWeight: '700',
-        marginBottom: SPACING.xs,
-    },
-    emptySubtitle: {
-        color: COLORS.textSecondary,
-        fontSize: 14,
-        textAlign: 'center',
-    },
+    chipOn: { backgroundColor: COLORS.ink },
+    chipText: { ...TYPE.chip, color: COLORS.ink },
+    chipTextOn: { color: COLORS.white },
+    empty: { alignItems: 'center', paddingVertical: SPACING.xxl, gap: 6 },
+    emptyTitle: { ...TYPE.heading, color: COLORS.ink },
+    emptyText: { ...TYPE.bodySm, color: COLORS.inkSecondary, textAlign: 'center', paddingHorizontal: SPACING.xl },
 });

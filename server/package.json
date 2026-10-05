@@ -5,29 +5,34 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js",
-    "db:setup": "node setup-db.js",
-    "db:create": "npx buns-migrate create",
-    "db:up": "npx buns-migrate up",
-    "db:down": "npx buns-migrate down",
-    "db:inspect": "npx buns-migrate inspectdb",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "nodemon src/server.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "postinstall": "prisma generate",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:studio": "prisma studio",
+    "db:seed": "prisma db seed"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@anclatechs/sql-buns": "^1.0.11",
-    "@anclatechs/sql-buns-migrate": "^1.0.27",
+    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/client": "^7.10.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
-    "nodemon": "^3.1.11",
+    "nodemon": "^3.1.14",
+    "pg": "^8.23.1",
     "socket.io": "^4.8.3",
     "stripe": "^20.2.0",
     "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "prisma": "^7.10.0"
   }
 }

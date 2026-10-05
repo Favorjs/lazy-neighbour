@@ -1,95 +1,58 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { COLORS, SPACING, RADIUS } from '../../constants/config';
+import { Icon } from '../ui/Icon';
+import { COLORS, RADIUS, TYPE } from '../../constants/config';
 
-export const KarmaBar = ({
-    karmaPoints = 0,
-    level = null,
-    showLabel = true,
-    style,
-}) => {
-    // Calculate level and progress
-    const calculateLevel = (points) => {
-        if (points < 100) return { level: 1, name: 'Newcomer', next: 100, progress: points / 100 };
-        if (points < 500) return { level: 2, name: 'Helper', next: 500, progress: (points - 100) / 400 };
-        if (points < 1000) return { level: 3, name: 'Champion', next: 1000, progress: (points - 500) / 500 };
-        if (points < 2500) return { level: 4, name: 'Legend', next: 2500, progress: (points - 1000) / 1500 };
-        return { level: 5, name: 'Lazy Hero', next: null, progress: 1 };
-    };
+const calculateLevel = (points) => {
+    if (points < 100) return { level: 1, name: 'Newcomer', next: 100, progress: points / 100 };
+    if (points < 500) return { level: 2, name: 'Helper', next: 500, progress: (points - 100) / 400 };
+    if (points < 1000) return { level: 3, name: 'Champion', next: 1000, progress: (points - 500) / 500 };
+    if (points < 2500) return { level: 4, name: 'Legend', next: 2500, progress: (points - 1000) / 1500 };
+    return { level: 5, name: 'Lazy Hero', next: null, progress: 1 };
+};
 
-    const levelInfo = calculateLevel(karmaPoints);
-    const progressWidth = `${Math.min(levelInfo.progress * 100, 100)}%`;
+// Level medal + karma points over a black-on-grey track
+export const KarmaBar = ({ karmaPoints = 0, showLabel = true, style }) => {
+    const info = calculateLevel(karmaPoints);
 
     return (
         <View style={[styles.container, style]}>
-            {showLabel && (
-                <View style={styles.header}>
-                    <View style={styles.levelBadge}>
-                        <Text style={styles.levelNumber}>Lvl {levelInfo.level}</Text>
-                        <Text style={styles.levelName}>{levelInfo.name}</Text>
+            {showLabel ? (
+                <View style={styles.head}>
+                    <View style={styles.level}>
+                        <View style={styles.medal}>
+                            <Icon name="Medal" size={18} color={COLORS.white} />
+                        </View>
+                        <Text style={styles.levelText}>Level {info.level} · {info.name}</Text>
                     </View>
                     <Text style={styles.points}>
-                        {karmaPoints} karma
-                        {levelInfo.next && ` / ${levelInfo.next}`}
+                        {karmaPoints} karma{info.next ? ` / ${info.next}` : ''}
                     </Text>
                 </View>
-            )}
-
-            <View style={styles.barContainer}>
-                <View style={[styles.barFill, { width: progressWidth }]} />
-                <View style={styles.barGlow} />
+            ) : null}
+            <View style={styles.track}>
+                <View style={[styles.fill, { width: `${Math.min(info.progress * 100, 100)}%` }]} />
             </View>
         </View>
     );
 };
 
 const styles = StyleSheet.create({
-    container: {
-        gap: SPACING.sm,
-    },
-    header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-    },
-    levelBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: SPACING.sm,
-    },
-    levelNumber: {
-        color: COLORS.primary,
-        fontSize: 14,
-        fontWeight: '700',
-    },
-    levelName: {
-        color: COLORS.textPrimary,
-        fontSize: 14,
-        fontWeight: '600',
-    },
-    points: {
-        color: COLORS.textSecondary,
-        fontSize: 12,
-    },
-    barContainer: {
-        height: 8,
-        backgroundColor: COLORS.bgElevated,
+    container: { gap: 10 },
+    head: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    level: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    medal: {
+        width: 32,
+        height: 32,
         borderRadius: RADIUS.full,
-        overflow: 'hidden',
+        backgroundColor: COLORS.ink,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
-    barFill: {
-        height: '100%',
-        backgroundColor: COLORS.primary,
-        borderRadius: RADIUS.full,
-    },
-    barGlow: {
-        position: 'absolute',
-        right: 0,
-        top: 0,
-        bottom: 0,
-        width: 20,
-        backgroundColor: 'rgba(124, 58, 237, 0.5)',
-    },
+    levelText: { ...TYPE.label, fontFamily: TYPE.cardTitle.fontFamily, color: COLORS.ink },
+    points: { ...TYPE.caption, color: COLORS.inkSecondary },
+    track: { height: 10, backgroundColor: COLORS.surfacePressed, borderRadius: RADIUS.full, overflow: 'hidden' },
+    fill: { height: '100%', backgroundColor: COLORS.ink, borderRadius: RADIUS.full },
 });
 
 export default KarmaBar;

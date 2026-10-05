@@ -3,18 +3,17 @@ import {
     View,
     Text,
     StyleSheet,
-    TouchableOpacity,
-    ActivityIndicator,
-    Alert,
-    Dimensions,
     Platform,
     FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
-import { Card, Badge } from '../../components/ui';
-import { COLORS, CATEGORIES, SPACING, RADIUS } from '../../constants/config';
+import { Button, IconButton, Icon, Sheet } from '../../components/ui';
+import { Skeleton, ErrandCardSkeleton } from '../../components/ui/Skeleton';
+import { ErrandCard } from '../../components/errand/ErrandCard';
+import { COLORS, CATEGORIES, SPACING, RADIUS, SHADOW, TYPE, IS_DARK } from '../../constants/config';
+import { getSavedLocation, subscribeLocation } from '../../services/locationStore';
 import api from '../../services/api';
 
 // Only import maps on native platforms
@@ -26,7 +25,6 @@ if (Platform.OS !== 'web') {
     Circle = Maps.Circle;
 }
 
-const { width } = Dimensions.get('window');
 const RADIUS_KM = 5;
 
 export default function RadarScreen() {
@@ -36,76 +34,76 @@ export default function RadarScreen() {
     const [errands, setErrands] = useState([]);
     const [loading, setLoading] = useState(true);
     const [selectedErrand, setSelectedErrand] = useState(null);
+    const [accepting, setAccepting] = useState(false);
 
     useEffect(() => {
         getLocationAndErrands();
+        // Reload if the person picks a different place from the home screen
+        return subscribeLocation((loc) => {
+            if (loc?.mode === 'custom') getLocationAndErrands();
+        });
     }, []);
 
     const getLocationAndErrands = async () => {
+        setLoading(true);
         try {
-            // Request location permission
-            const { status } = await Location.requestForegroundPermissionsAsync();
-            if (status !== 'granted') {
-                Alert.alert(
-                    'Permission Denied',
-                    'Location permission is required to find nearby errands.'
-                );
-                setLoading(false);
-                return;
+            let coords;
+            const chosen = getSavedLocation();
+
+            if (chosen?.mode === 'custom') {
+                // The person picked a place on the home screen: search around that instead of the GPS fix
+                coords = { latitude: chosen.latitude, longitude: chosen.longitude };
+            } else {
+                const { status } = await Location.requestForegroundPermissionsAsync();
+                if (status !== 'granted') {
+                    setLoading(false);
+                    return;
+                }
+
+                const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+                coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
             }
-
-            // Get current location
-            const loc = await Location.getCurrentPositionAsync({
-                accuracy: Location.Accuracy.Balanced,
-            });
-
-            const coords = {
-                latitude: loc.coords.latitude,
-                longitude: loc.coords.longitude,
-            };
             setLocation(coords);
 
-            // Fetch nearby errands
-            const data = await api.getNearbyErrands(
-                coords.latitude,
-                coords.longitude,
-                RADIUS_KM
-            );
+            const data = await api.getNearbyErrands(coords.latitude, coords.longitude, RADIUS_KM);
             setErrands(data.errands || []);
         } catch (error) {
             console.error('Failed to get location/errands:', error);
-            Alert.alert('Error', 'Failed to load nearby errands');
+            Sheet.alert('Something went wrong', error.message || 'Could not load errands near you');
         } finally {
             setLoading(false);
         }
     };
 
-    const handleMarkerPress = (errand) => {
-        setSelectedErrand(errand);
-    };
-
-    const handleErrandPress = () => {
-        if (selectedErrand) {
-            router.push(`/errand/${selectedErrand.id}`);
+    const acceptErrand = async (errand) => {
+        setAccepting(true);
+        try {
+            await api.acceptErrand(errand.id);
+            setSelectedErrand(null);
+            setErrands((list) => list.filter((e) => e.id !== errand.id));
+            router.push(`/errand/${errand.id}`);
+        } catch (error) {
+            Sheet.alert('Could not accept', error.message || 'Please try again');
+        } finally {
+            setAccepting(false);
         }
     };
 
     const centerOnUser = () => {
         if (location && mapRef.current) {
-            mapRef.current.animateToRegion({
-                ...location,
-                latitudeDelta: 0.05,
-                longitudeDelta: 0.05,
-            });
+            mapRef.current.animateToRegion({ ...location, latitudeDelta: 0.05, longitudeDelta: 0.05 });
         }
     };
 
     if (loading) {
         return (
-            <SafeAreaView style={styles.container}>
-                <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color={COLORS.primary} />
-                    <Text style={styles.loadingText}>Finding nearby errands...</Text>
+            <SafeAreaView style={styles.container} edges={['top']}>
+                <View style={{ flex: 1, paddingHorizontal: SPACING.lg, paddingTop: SPACING.sm }}>
+                    <Skeleton height={64} radius={RADIUS.full} />
+                    <Skeleton height={320} radius={RADIUS.card} style={{ marginTop: SPACING.md }} />
+                    <View style={{ marginTop: SPACING.lg }}>
+                        <ErrandCardSkeleton />
+                    </View>
                 </View>
             </SafeAreaView>
         );
@@ -114,66 +112,43 @@ export default function RadarScreen() {
     if (!location) {
         return (
             <SafeAreaView style={styles.container}>
-                <View style={styles.errorContainer}>
-                    <Text style={styles.errorEmoji}>📍</Text>
-                    <Text style={styles.errorTitle}>Location Required</Text>
-                    <Text style={styles.errorText}>
-                        Please enable location services to find nearby errands.
+                <View style={styles.center}>
+                    <View style={styles.bigDisc}>
+                        <Icon name="MapPin" size={32} />
+                    </View>
+                    <Text style={styles.emptyTitle}>Where are you?</Text>
+                    <Text style={styles.emptyText}>
+                        Turn on location so we can show errands your neighbours need done nearby.
                     </Text>
-                    <TouchableOpacity style={styles.retryButton} onPress={getLocationAndErrands}>
-                        <Text style={styles.retryText}>Try Again</Text>
-                    </TouchableOpacity>
+                    <Button title="Turn on location" variant="primary" onPress={getLocationAndErrands} />
                 </View>
             </SafeAreaView>
         );
     }
 
-    // Web fallback - show list instead of map
+    // Web fallback: a list instead of a map
     if (Platform.OS === 'web') {
         return (
             <SafeAreaView style={styles.container}>
-                <View style={styles.header}>
-                    <Text style={styles.title}>Errand Radar</Text>
-                    <Text style={styles.subtitle}>
-                        {errands.length} tasks within {RADIUS_KM}km
-                    </Text>
+                <View style={styles.listHeader}>
+                    <Text style={styles.title}>Run errands</Text>
+                    <Text style={styles.muted}>{errands.length} errands within {RADIUS_KM} km</Text>
                 </View>
                 <FlatList
                     data={errands}
                     keyExtractor={(item) => item.id}
                     contentContainerStyle={{ padding: SPACING.lg }}
-                    renderItem={({ item }) => {
-                        const category = CATEGORIES[item.category] || {};
-                        return (
-                            <TouchableOpacity
-                                onPress={() => router.push(`/errand/${item.id}`)}
-                                activeOpacity={0.8}
-                            >
-                                <Card variant="elevated" style={{ marginBottom: SPACING.md }}>
-                                    <View style={styles.cardHeader}>
-                                        <View style={styles.categoryTag}>
-                                            <Text>{category.icon}</Text>
-                                            <Text style={styles.categoryLabel}>{category.label}</Text>
-                                        </View>
-                                        <Badge status={item.status} size="sm" />
-                                    </View>
-                                    <Text style={styles.cardTitle}>{item.title}</Text>
-                                    <Text style={styles.cardDescription} numberOfLines={2}>
-                                        {item.description}
-                                    </Text>
-                                    <View style={styles.cardFooter}>
-                                        <Text style={styles.bounty}>${item.bountyAmount}</Text>
-                                        <Text style={styles.distance}>📍 {item.distance} km away</Text>
-                                    </View>
-                                </Card>
-                            </TouchableOpacity>
-                        );
-                    }}
+                    renderItem={({ item }) => (
+                        <ErrandCard
+                            errand={item}
+                            onPress={(e) => router.push(`/errand/${e.id}`)}
+                            onAccept={acceptErrand}
+                        />
+                    )}
                     ListEmptyComponent={
-                        <View style={styles.errorContainer}>
-                            <Text style={styles.errorEmoji}>🔍</Text>
-                            <Text style={styles.errorTitle}>No errands nearby</Text>
-                            <Text style={styles.errorText}>Check back later!</Text>
+                        <View style={styles.center}>
+                            <Text style={styles.emptyTitle}>Nothing nearby yet</Text>
+                            <Text style={styles.emptyText}>Check back soon, neighbours are always up to something.</Text>
                         </View>
                     }
                 />
@@ -186,286 +161,148 @@ export default function RadarScreen() {
             <MapView
                 ref={mapRef}
                 style={styles.map}
-                initialRegion={{
-                    ...location,
-                    latitudeDelta: 0.05,
-                    longitudeDelta: 0.05,
-                }}
-                customMapStyle={darkMapStyle}
+                initialRegion={{ ...location, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
+                showsUserLocation
+                userInterfaceStyle={IS_DARK ? 'dark' : 'light'}
+                onPress={() => setSelectedErrand(null)}
             >
-                {/* User location marker */}
-                <Marker coordinate={location}>
-                    <View style={styles.userMarker}>
-                        <Text>📍</Text>
-                    </View>
-                </Marker>
-
-                {/* Radius circle */}
                 <Circle
                     center={location}
                     radius={RADIUS_KM * 1000}
-                    strokeColor={COLORS.primary}
-                    fillColor={`${COLORS.primary}10`}
-                    strokeWidth={2}
+                    strokeColor={COLORS.ink}
+                    fillColor="rgba(0,0,0,0.04)"
+                    strokeWidth={1}
                 />
 
-                {/* Errand markers */}
                 {errands.map((errand) => {
-                    const category = CATEGORIES[errand.category] || {};
+                    const category = CATEGORIES[errand.category] || CATEGORIES.QUICK;
+                    const on = selectedErrand?.id === errand.id;
                     return (
                         <Marker
                             key={errand.id}
-                            coordinate={{
-                                latitude: errand.locationLat,
-                                longitude: errand.locationLng,
-                            }}
-                            onPress={() => handleMarkerPress(errand)}
+                            coordinate={{ latitude: errand.locationLat, longitude: errand.locationLng }}
+                            onPress={() => setSelectedErrand(errand)}
+                            tracksViewChanges={false}
                         >
-                            <View
-                                style={[
-                                    styles.errandMarker,
-                                    { backgroundColor: category.color || COLORS.primary },
-                                ]}
-                            >
-                                <Text style={styles.markerIcon}>{category.icon || '📌'}</Text>
+                            <View style={[styles.pin, on && styles.pinOn]}>
+                                <Icon name={category.icon} size={on ? 20 : 18} color={COLORS.white} />
                             </View>
                         </Marker>
                     );
                 })}
             </MapView>
 
-            {/* Header overlay */}
-            <SafeAreaView style={styles.headerOverlay}>
-                <View style={styles.header}>
-                    <Text style={styles.title}>Errand Radar</Text>
-                    <Text style={styles.subtitle}>
-                        {errands.length} tasks within {RADIUS_KM}km
-                    </Text>
+            {/* Floating search-style header */}
+            <SafeAreaView style={styles.headerOverlay} pointerEvents="box-none">
+                <View style={styles.headerPill}>
+                    <Icon name="Radar" size={20} />
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.headerTitle}>Run errands</Text>
+                        <Text style={styles.headerSub}>{errands.length} within {RADIUS_KM} km</Text>
+                    </View>
                 </View>
             </SafeAreaView>
 
-            {/* Center button */}
-            <TouchableOpacity style={styles.centerButton} onPress={centerOnUser}>
-                <Text>🎯</Text>
-            </TouchableOpacity>
+            <IconButton
+                icon="Locate"
+                label="Centre on me"
+                onPress={centerOnUser}
+                style={[styles.locate, selectedErrand ? { bottom: 330 } : { bottom: 170 }]}
+            />
 
-            {/* Selected errand card */}
-            {selectedErrand && (
-                <TouchableOpacity
-                    style={styles.errandCardContainer}
-                    onPress={handleErrandPress}
-                    activeOpacity={0.9}
-                >
-                    <Card variant="elevated" style={styles.errandCard}>
-                        <View style={styles.cardHeader}>
-                            <View style={styles.categoryTag}>
-                                <Text>{CATEGORIES[selectedErrand.category]?.icon}</Text>
-                                <Text style={styles.categoryLabel}>
-                                    {CATEGORIES[selectedErrand.category]?.label}
-                                </Text>
-                            </View>
-                            <Badge status={selectedErrand.status} size="sm" />
-                        </View>
-                        <Text style={styles.cardTitle} numberOfLines={1}>
-                            {selectedErrand.title}
+            {/* Bottom sheet */}
+            <View style={styles.sheet}>
+                <View style={styles.grabber} />
+                {selectedErrand ? (
+                    <ErrandCard
+                        errand={selectedErrand}
+                        onPress={(e) => router.push(`/errand/${e.id}`)}
+                        onAccept={acceptErrand}
+                        acceptLoading={accepting}
+                    />
+                ) : (
+                    <View style={styles.sheetEmpty}>
+                        <Text style={styles.sheetTitle}>
+                            {errands.length ? 'Pick an errand' : 'Nothing nearby yet'}
                         </Text>
-                        <Text style={styles.cardDescription} numberOfLines={2}>
-                            {selectedErrand.description}
+                        <Text style={styles.muted}>
+                            {errands.length
+                                ? 'Tap a pin on the map to see the details and the bounty.'
+                                : 'Check back soon, neighbours are always up to something.'}
                         </Text>
-                        <View style={styles.cardFooter}>
-                            <Text style={styles.bounty}>${selectedErrand.bountyAmount}</Text>
-                            <Text style={styles.distance}>
-                                📍 {selectedErrand.distance} km away
-                            </Text>
-                        </View>
-                    </Card>
-                </TouchableOpacity>
-            )}
+                    </View>
+                )}
+            </View>
         </View>
     );
 }
 
-// Dark map style for the theme
-const darkMapStyle = [
-    { elementType: 'geometry', stylers: [{ color: '#1d2c4d' }] },
-    { elementType: 'labels.text.fill', stylers: [{ color: '#8ec3b9' }] },
-    { elementType: 'labels.text.stroke', stylers: [{ color: '#1a3646' }] },
-    {
-        featureType: 'water',
-        elementType: 'geometry',
-        stylers: [{ color: '#17263c' }],
-    },
-    {
-        featureType: 'road',
-        elementType: 'geometry',
-        stylers: [{ color: '#304a7d' }],
-    },
-];
-
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: COLORS.bgDark,
-    },
-    loadingContainer: {
-        flex: 1,
+    container: { flex: 1, backgroundColor: COLORS.surface },
+    center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: SPACING.xl, gap: SPACING.sm },
+    muted: { ...TYPE.bodySm, color: COLORS.inkSecondary, textAlign: 'center' },
+    bigDisc: {
+        width: 72,
+        height: 72,
+        borderRadius: RADIUS.full,
+        backgroundColor: COLORS.surfaceMuted,
         alignItems: 'center',
         justifyContent: 'center',
-        gap: SPACING.md,
-    },
-    loadingText: {
-        color: COLORS.textSecondary,
-        fontSize: 14,
-    },
-    errorContainer: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: SPACING.xl,
-    },
-    errorEmoji: {
-        fontSize: 64,
-        marginBottom: SPACING.md,
-    },
-    errorTitle: {
-        color: COLORS.textPrimary,
-        fontSize: 20,
-        fontWeight: '700',
         marginBottom: SPACING.sm,
     },
-    errorText: {
-        color: COLORS.textSecondary,
-        fontSize: 14,
-        textAlign: 'center',
-        marginBottom: SPACING.lg,
+    emptyTitle: { ...TYPE.title, color: COLORS.ink, textAlign: 'center' },
+    emptyText: { ...TYPE.body, color: COLORS.inkSecondary, textAlign: 'center', marginBottom: SPACING.md },
+    listHeader: { paddingHorizontal: SPACING.lg, paddingTop: SPACING.md },
+    title: { ...TYPE.title, color: COLORS.ink },
+    map: { flex: 1 },
+    headerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, paddingHorizontal: SPACING.lg },
+    headerPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        marginTop: SPACING.sm,
+        backgroundColor: COLORS.white,
+        borderRadius: RADIUS.full,
+        paddingVertical: 10,
+        paddingHorizontal: SPACING.md,
+        ...SHADOW.float,
     },
-    retryButton: {
-        backgroundColor: COLORS.primary,
-        paddingVertical: SPACING.md,
-        paddingHorizontal: SPACING.xl,
-        borderRadius: RADIUS.lg,
-    },
-    retryText: {
-        color: COLORS.white,
-        fontWeight: '600',
-    },
-    map: {
-        flex: 1,
-    },
-    headerOverlay: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-    },
-    header: {
-        padding: SPACING.lg,
-        backgroundColor: 'rgba(15, 23, 42, 0.9)',
-        borderBottomLeftRadius: RADIUS.xl,
-        borderBottomRightRadius: RADIUS.xl,
-    },
-    title: {
-        color: COLORS.textPrimary,
-        fontSize: 24,
-        fontWeight: '800',
-    },
-    subtitle: {
-        color: COLORS.textSecondary,
-        fontSize: 14,
-        marginTop: 2,
-    },
-    userMarker: {
+    headerTitle: { ...TYPE.cardTitle, color: COLORS.ink },
+    headerSub: { ...TYPE.caption, color: COLORS.inkSecondary },
+    pin: {
         width: 40,
         height: 40,
-        backgroundColor: COLORS.primary,
-        borderRadius: 20,
-        alignItems: 'center',
-        justifyContent: 'center',
+        borderRadius: RADIUS.full,
+        backgroundColor: COLORS.ink,
         borderWidth: 3,
         borderColor: COLORS.white,
-    },
-    errandMarker: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
         alignItems: 'center',
         justifyContent: 'center',
-        borderWidth: 2,
-        borderColor: COLORS.white,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-        elevation: 5,
+        ...SHADOW.float,
     },
-    markerIcon: {
-        fontSize: 16,
-    },
-    centerButton: {
+    pinOn: { width: 48, height: 48, transform: [{ rotate: '-4deg' }] },
+    locate: { position: 'absolute', right: SPACING.lg, backgroundColor: COLORS.white, ...SHADOW.float },
+    sheet: {
         position: 'absolute',
-        right: SPACING.lg,
-        bottom: 180,
-        width: 48,
-        height: 48,
-        backgroundColor: COLORS.bgCard,
-        borderRadius: 24,
-        alignItems: 'center',
-        justifyContent: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-        elevation: 5,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: COLORS.white,
+        borderTopLeftRadius: RADIUS.sheet,
+        borderTopRightRadius: RADIUS.sheet,
+        paddingHorizontal: SPACING.lg,
+        paddingTop: SPACING.sm,
+        paddingBottom: SPACING.sm,
+        ...SHADOW.sheet,
     },
-    errandCardContainer: {
-        position: 'absolute',
-        bottom: 100,
-        left: SPACING.lg,
-        right: SPACING.lg,
+    grabber: {
+        alignSelf: 'center',
+        width: 40,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: COLORS.surfacePressed,
+        marginBottom: SPACING.md,
     },
-    errandCard: {
-        padding: SPACING.md,
-    },
-    cardHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: SPACING.sm,
-    },
-    categoryTag: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: SPACING.xs,
-    },
-    categoryLabel: {
-        color: COLORS.textSecondary,
-        fontSize: 12,
-        fontWeight: '600',
-    },
-    cardTitle: {
-        color: COLORS.textPrimary,
-        fontSize: 16,
-        fontWeight: '700',
-        marginBottom: SPACING.xs,
-    },
-    cardDescription: {
-        color: COLORS.textSecondary,
-        fontSize: 13,
-        lineHeight: 18,
-        marginBottom: SPACING.sm,
-    },
-    cardFooter: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-    },
-    bounty: {
-        color: COLORS.accent,
-        fontSize: 20,
-        fontWeight: '800',
-    },
-    distance: {
-        color: COLORS.textSecondary,
-        fontSize: 12,
-    },
+    sheetEmpty: { paddingBottom: SPACING.md, gap: 4 },
+    sheetTitle: { ...TYPE.heading, color: COLORS.ink, textAlign: 'center' },
 });

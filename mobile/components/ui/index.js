@@ -1,5 +1,9 @@
-export { Button } from './Button';
+export { Button, IconButton, Fab } from './Button';
 export { Card } from './Card';
 export { Input } from './Input';
 export { Badge } from './Badge';
 export { Avatar } from './Avatar';
+export { Icon } from './Icon';
+export { Sheet, SheetHost } from './Sheet';
+export { Skeleton } from './Skeleton';
+export { ScreenHeader } from './ScreenHeader';

@@ -1,57 +1,65 @@
 const express = require('express');
-const { pool } = require('../models/db');
+const { prisma } = require('../models/db');
 const { authMiddleware } = require('../middleware/authMiddleware');
+const { notify } = require('../services/notificationService');
 
 const router = express.Router();
+
+// Chat is only open while an errand is in progress (until the requester pays)
+const CHAT_OPEN_STATUSES = ['ACTIVE', 'COMPLETED'];
+
+const SENDER_SELECT = { id: true, name: true, avatarUrl: true };
+
+const toMessage = (m) => ({
+    id: m.id,
+    content: m.content,
+    isRead: m.isRead,
+    createdAt: m.createdAt,
+    senderId: m.senderId,
+    errandId: m.errandId,
+    sender: {
+        id: m.sender.id,
+        name: m.sender.name,
+        avatarUrl: m.sender.avatarUrl
+    }
+});
 
 // GET /api/chat/:errandId - Get messages for an errand
 router.get('/:errandId', authMiddleware, async (req, res) => {
     try {
         // Get errand to verify permissions
-        const errandResult = await pool.query(`
-            SELECT requester_id, runner_id FROM errands WHERE id = $1
-        `, [req.params.errandId]);
+        const errand = await prisma.errand.findUnique({
+            where: { id: req.params.errandId },
+            select: { requesterId: true, runnerId: true }
+        });
 
-        if (errandResult.rows.length === 0) {
+        if (!errand) {
             return res.status(404).json({ error: 'Errand not found' });
         }
 
-        const errand = errandResult.rows[0];
-
         // Only participants can view chat
-        if (errand.requester_id !== req.user.id && errand.runner_id !== req.user.id) {
+        if (errand.requesterId !== req.user.id && errand.runnerId !== req.user.id) {
             return res.status(403).json({ error: 'Not authorized to view this chat' });
         }
 
         // Get messages with sender info
-        const messagesResult = await pool.query(`
-            SELECT m.*, s.name as sender_name, s.avatar_url as sender_avatar_url
-            FROM messages m
-            JOIN users s ON m.sender_id = s.id
-            WHERE m.errand_id = $1
-            ORDER BY m.created_at ASC
-        `, [req.params.errandId]);
+        const rows = await prisma.message.findMany({
+            where: { errandId: req.params.errandId },
+            include: { sender: { select: SENDER_SELECT } },
+            orderBy: { createdAt: 'asc' }
+        });
 
-        const messages = messagesResult.rows.map(m => ({
-            id: m.id,
-            content: m.content,
-            isRead: m.is_read,
-            createdAt: m.created_at,
-            senderId: m.sender_id,
-            errandId: m.errand_id,
-            sender: {
-                id: m.sender_id,
-                name: m.sender_name,
-                avatarUrl: m.sender_avatar_url
-            }
-        }));
+        const messages = rows.map(toMessage);
 
         // Mark messages as read
-        await pool.query(`
-            UPDATE messages 
-            SET is_read = true 
-            WHERE errand_id = $1 AND sender_id != $2 AND is_read = false
-        `, [req.params.errandId, req.user.id]);
+        await prisma.message.updateMany({
+            where: {
+                errandId: req.params.errandId,
+                senderId: { not: req.user.id },
+                isRead: false
+            },
+            data: { isRead: true }
+        });
 
         res.json({ messages });
     } catch (error) {
@@ -70,50 +78,36 @@ router.post('/:errandId', authMiddleware, async (req, res) => {
         }
 
         // Get errand to verify permissions
-        const errandResult = await pool.query(`
-            SELECT id, requester_id, runner_id FROM errands WHERE id = $1
-        `, [req.params.errandId]);
+        const errand = await prisma.errand.findUnique({
+            where: { id: req.params.errandId },
+            select: { id: true, requesterId: true, runnerId: true, status: true }
+        });
 
-        if (errandResult.rows.length === 0) {
+        if (!errand) {
             return res.status(404).json({ error: 'Errand not found' });
         }
 
-        const errand = errandResult.rows[0];
-
         // Only participants can send messages
-        if (errand.requester_id !== req.user.id && errand.runner_id !== req.user.id) {
+        if (errand.requesterId !== req.user.id && errand.runnerId !== req.user.id) {
             return res.status(403).json({ error: 'Not authorized to send messages' });
         }
 
-        // Create message
-        const messageResult = await pool.query(`
-            INSERT INTO messages (content, sender_id, errand_id)
-            VALUES ($1, $2, $3)
-            RETURNING *
-        `, [content.trim(), req.user.id, req.params.errandId]);
+        if (!CHAT_OPEN_STATUSES.includes(errand.status)) {
+            return res.status(403).json({
+                code: 'CHAT_CLOSED',
+                error: 'Chat opens when a runner picks up the errand and closes once it is paid.'
+            });
+        }
 
-        const m = messageResult.rows[0];
-
-        // Get sender info
-        const senderResult = await pool.query(`
-            SELECT id, name, avatar_url FROM users WHERE id = $1
-        `, [req.user.id]);
-
-        const sender = senderResult.rows[0];
-
-        const message = {
-            id: m.id,
-            content: m.content,
-            isRead: m.is_read,
-            createdAt: m.created_at,
-            senderId: m.sender_id,
-            errandId: m.errand_id,
-            sender: {
-                id: sender.id,
-                name: sender.name,
-                avatarUrl: sender.avatar_url
-            }
-        };
+        // Create message (with sender info)
+        const message = toMessage(await prisma.message.create({
+            data: {
+                content: content.trim(),
+                senderId: req.user.id,
+                errandId: req.params.errandId
+            },
+            include: { sender: { select: SENDER_SELECT } }
+        }));
 
         // Emit via Socket.io
         const io = req.app.get('io');
@@ -121,9 +115,9 @@ router.post('/:errandId', authMiddleware, async (req, res) => {
             io.to(`errand-${req.params.errandId}`).emit('new-message', message);
 
             // Notify other participant
-            const recipientId = errand.requester_id === req.user.id
-                ? errand.runner_id
-                : errand.requester_id;
+            const recipientId = errand.requesterId === req.user.id
+                ? errand.runnerId
+                : errand.requesterId;
 
             if (recipientId) {
                 io.to(`user-${recipientId}`).emit('message-notification', {
@@ -131,6 +125,17 @@ router.post('/:errandId', authMiddleware, async (req, res) => {
                     message
                 });
             }
+        }
+
+        const recipientId = errand.requesterId === req.user.id ? errand.runnerId : errand.requesterId;
+        if (recipientId) {
+            const preview = message.content.length > 80 ? `${message.content.slice(0, 77)}...` : message.content;
+            notify(io, recipientId, {
+                type: 'MESSAGE',
+                title: `New message from ${req.user.name}`,
+                body: preview,
+                errandId: errand.id
+            });
         }
 
         res.status(201).json({ message });
@@ -143,16 +148,17 @@ router.post('/:errandId', authMiddleware, async (req, res) => {
 // GET /api/chat/unread/count - Get unread message count
 router.get('/unread/count', authMiddleware, async (req, res) => {
     try {
-        const result = await pool.query(`
-            SELECT COUNT(*) as count
-            FROM messages m
-            JOIN errands e ON m.errand_id = e.id
-            WHERE (e.requester_id = $1 OR e.runner_id = $1)
-              AND m.sender_id != $1
-              AND m.is_read = false
-        `, [req.user.id]);
+        const unreadCount = await prisma.message.count({
+            where: {
+                senderId: { not: req.user.id },
+                isRead: false,
+                errand: {
+                    OR: [{ requesterId: req.user.id }, { runnerId: req.user.id }]
+                }
+            }
+        });
 
-        res.json({ unreadCount: parseInt(result.rows[0].count) });
+        res.json({ unreadCount });
     } catch (error) {
         console.error('Get unread count error:', error);
         res.status(500).json({ error: 'Failed to get unread count' });

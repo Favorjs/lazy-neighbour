@@ -1,7 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { pool } = require('../models/db');
+const { prisma } = require('../models/db');
 const { authMiddleware } = require('../middleware/authMiddleware');
 
 const router = express.Router();
@@ -34,12 +34,12 @@ router.post('/register', async (req, res) => {
         }
 
         // Check if user exists
-        const existingUserResult = await pool.query(
-            `SELECT id FROM users WHERE email = $1`,
-            [email.toLowerCase()]
-        );
+        const existingUser = await prisma.user.findUnique({
+            where: { email: email.toLowerCase() },
+            select: { id: true }
+        });
 
-        if (existingUserResult.rows.length > 0) {
+        if (existingUser) {
             return res.status(400).json({ error: 'Email already registered' });
         }
 
@@ -47,13 +47,19 @@ router.post('/register', async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, 12);
 
         // Create user
-        const result = await pool.query(`
-            INSERT INTO users (email, password, name, phone)
-            VALUES ($1, $2, $3, $4)
-            RETURNING id, email, name, phone, current_role, rating_score, karma_points, created_at
-        `, [email.toLowerCase(), hashedPassword, name, phone || null]);
+        const user = await prisma.user.create({
+            data: {
+                email: email.toLowerCase(),
+                password: hashedPassword,
+                name,
+                phone: phone || null
+            },
+            select: {
+                id: true, email: true, name: true, phone: true, currentRole: true,
+                ratingScore: true, karmaPoints: true, createdAt: true
+            }
+        });
 
-        const user = result.rows[0];
         const token = generateToken(user.id);
 
         res.status(201).json({
@@ -63,14 +69,18 @@ router.post('/register', async (req, res) => {
                 email: user.email,
                 name: user.name,
                 phone: user.phone,
-                currentRole: user.current_role,
-                ratingScore: parseFloat(user.rating_score),
-                karmaPoints: user.karma_points,
-                createdAt: user.created_at
+                currentRole: user.currentRole,
+                ratingScore: Number(user.ratingScore),
+                karmaPoints: user.karmaPoints,
+                createdAt: user.createdAt
             },
             token
         });
     } catch (error) {
+        // Unique constraint hit by a concurrent registration
+        if (error.code === 'P2002') {
+            return res.status(400).json({ error: 'Email already registered' });
+        }
         console.error('Register error:', error);
         res.status(500).json({ error: 'Failed to create account' });
     }
@@ -88,12 +98,9 @@ router.post('/login', async (req, res) => {
         }
 
         // Find user
-        const result = await pool.query(
-            `SELECT * FROM users WHERE email = $1`,
-            [email.toLowerCase()]
-        );
-
-        const user = result.rows[0];
+        const user = await prisma.user.findUnique({
+            where: { email: email.toLowerCase() }
+        });
 
         if (!user) {
             return res.status(401).json({ error: 'Invalid credentials' });
@@ -108,7 +115,7 @@ router.post('/login', async (req, res) => {
 
         const token = generateToken(user.id);
 
-        // Transform to camelCase and remove password
+        // Remove password from the response
         res.json({
             message: 'Welcome back! 👋',
             user: {
@@ -116,17 +123,18 @@ router.post('/login', async (req, res) => {
                 email: user.email,
                 name: user.name,
                 phone: user.phone,
-                avatarUrl: user.avatar_url,
-                ratingScore: parseFloat(user.rating_score),
-                karmaPoints: user.karma_points,
-                totalEarnings: parseFloat(user.total_earnings),
-                totalSpent: parseFloat(user.total_spent),
-                currentRole: user.current_role,
-                stripeAccountId: user.stripe_account_id,
-                stripeCustomerId: user.stripe_customer_id,
-                isVerified: user.is_verified,
-                createdAt: user.created_at,
-                updatedAt: user.updated_at
+                avatarUrl: user.avatarUrl,
+                ratingScore: Number(user.ratingScore),
+                karmaPoints: user.karmaPoints,
+                totalEarnings: Number(user.totalEarnings),
+                totalSpent: Number(user.totalSpent),
+                currentRole: user.currentRole,
+                stripeAccountId: user.stripeAccountId,
+                stripeCustomerId: user.stripeCustomerId,
+                isVerified: user.isVerified,
+                walletBalance: Number(user.walletBalance),
+                createdAt: user.createdAt,
+                updatedAt: user.updatedAt
             },
             token
         });
@@ -140,24 +148,15 @@ router.post('/login', async (req, res) => {
 router.get('/me', authMiddleware, async (req, res) => {
     try {
         // Get user stats
-        const [requestedResult, completedResult] = await Promise.all([
-            pool.query(
-                `SELECT COUNT(*) as count FROM errands WHERE requester_id = $1`,
-                [req.user.id]
-            ),
-            pool.query(
-                `SELECT COUNT(*) as count FROM errands WHERE runner_id = $1 AND status = 'RELEASED'`,
-                [req.user.id]
-            )
+        const [errandsRequested, errandsCompleted] = await Promise.all([
+            prisma.errand.count({ where: { requesterId: req.user.id } }),
+            prisma.errand.count({ where: { runnerId: req.user.id, status: 'RELEASED' } })
         ]);
 
         res.json({
             user: {
                 ...req.user,
-                stats: {
-                    errandsRequested: parseInt(requestedResult.rows[0].count),
-                    errandsCompleted: parseInt(completedResult.rows[0].count)
-                }
+                stats: { errandsRequested, errandsCompleted }
             }
         });
     } catch (error) {
@@ -171,14 +170,15 @@ router.patch('/toggle-role', authMiddleware, async (req, res) => {
     try {
         const newRole = req.user.currentRole === 'LAZY' ? 'RUNNER' : 'LAZY';
 
-        const result = await pool.query(`
-            UPDATE users 
-            SET current_role = $1, updated_at = NOW()
-            WHERE id = $2
-            RETURNING id, email, name, current_role, rating_score, karma_points
-        `, [newRole, req.user.id]);
+        const user = await prisma.user.update({
+            where: { id: req.user.id },
+            data: { currentRole: newRole },
+            select: {
+                id: true, email: true, name: true, currentRole: true,
+                ratingScore: true, karmaPoints: true
+            }
+        });
 
-        const user = result.rows[0];
         const emoji = newRole === 'RUNNER' ? '🏃' : '😴';
 
         res.json({
@@ -187,9 +187,9 @@ router.patch('/toggle-role', authMiddleware, async (req, res) => {
                 id: user.id,
                 email: user.email,
                 name: user.name,
-                currentRole: user.current_role,
-                ratingScore: parseFloat(user.rating_score),
-                karmaPoints: user.karma_points
+                currentRole: user.currentRole,
+                ratingScore: Number(user.ratingScore),
+                karmaPoints: user.karmaPoints
             }
         });
     } catch (error) {
@@ -203,39 +203,23 @@ router.patch('/profile', authMiddleware, async (req, res) => {
     try {
         const { name, phone, avatarUrl } = req.body;
 
-        // Build dynamic update query
-        const updates = [];
-        const values = [];
-        let paramCount = 1;
+        const data = {};
+        if (name) data.name = name;
+        if (phone) data.phone = phone;
+        if (avatarUrl) data.avatarUrl = avatarUrl;
 
-        if (name) {
-            updates.push(`name = $${paramCount++}`);
-            values.push(name);
-        }
-        if (phone) {
-            updates.push(`phone = $${paramCount++}`);
-            values.push(phone);
-        }
-        if (avatarUrl) {
-            updates.push(`avatar_url = $${paramCount++}`);
-            values.push(avatarUrl);
-        }
-
-        if (updates.length === 0) {
+        if (Object.keys(data).length === 0) {
             return res.status(400).json({ error: 'No fields to update' });
         }
 
-        updates.push(`updated_at = NOW()`);
-        values.push(req.user.id);
-
-        const result = await pool.query(`
-            UPDATE users 
-            SET ${updates.join(', ')}
-            WHERE id = $${paramCount}
-            RETURNING id, email, name, phone, avatar_url, current_role, rating_score, karma_points
-        `, values);
-
-        const user = result.rows[0];
+        const user = await prisma.user.update({
+            where: { id: req.user.id },
+            data,
+            select: {
+                id: true, email: true, name: true, phone: true, avatarUrl: true,
+                currentRole: true, ratingScore: true, karmaPoints: true
+            }
+        });
 
         res.json({
             message: 'Profile updated! ✨',
@@ -244,10 +228,10 @@ router.patch('/profile', authMiddleware, async (req, res) => {
                 email: user.email,
                 name: user.name,
                 phone: user.phone,
-                avatarUrl: user.avatar_url,
-                currentRole: user.current_role,
-                ratingScore: parseFloat(user.rating_score),
-                karmaPoints: user.karma_points
+                avatarUrl: user.avatarUrl,
+                currentRole: user.currentRole,
+                ratingScore: Number(user.ratingScore),
+                karmaPoints: user.karmaPoints
             }
         });
     } catch (error) {
@@ -261,14 +245,60 @@ router.post('/push-token', authMiddleware, async (req, res) => {
     try {
         const { pushToken } = req.body;
 
-        await pool.query(`
-            UPDATE users SET push_token = $1, updated_at = NOW() WHERE id = $2
-        `, [pushToken, req.user.id]);
+        await prisma.user.update({
+            where: { id: req.user.id },
+            data: { pushToken }
+        });
 
         res.json({ message: 'Push token saved' });
     } catch (error) {
         console.error('Save push token error:', error);
         res.status(500).json({ error: 'Failed to save push token' });
+    }
+});
+
+// DELETE /api/auth/account - Permanently delete the account (password required)
+router.delete('/account', authMiddleware, async (req, res) => {
+    try {
+        const { password } = req.body || {};
+
+        if (!password) {
+            return res.status(400).json({ error: 'Enter your password to delete your account' });
+        }
+
+        const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+        const valid = user && await bcrypt.compare(password, user.password);
+
+        if (!valid) {
+            return res.status(401).json({ error: 'That password is not right' });
+        }
+
+        // Do not let anyone walk away from errands in flight or money in the wallet
+        const open = await prisma.errand.count({
+            where: {
+                OR: [{ requesterId: user.id }, { runnerId: user.id }],
+                status: { in: ['PENDING', 'ACTIVE', 'COMPLETED', 'DISPUTED'] }
+            }
+        });
+
+        if (open > 0) {
+            return res.status(409).json({
+                error: 'Finish or cancel your open errands before deleting your account'
+            });
+        }
+
+        if (Number(user.walletBalance) > 0) {
+            return res.status(409).json({
+                error: 'Withdraw what is left in your wallet before deleting your account'
+            });
+        }
+
+        await prisma.user.delete({ where: { id: user.id } });
+
+        res.json({ message: 'Your account has been deleted' });
+    } catch (error) {
+        console.error('Delete account error:', error);
+        res.status(500).json({ error: 'Failed to delete account' });
     }
 });
 
