@@ -1,6 +1,7 @@
 const express = require('express');
 const { prisma } = require('../models/db');
 const { authMiddleware } = require('../middleware/authMiddleware');
+const { idempotent } = require('../middleware/idempotency');
 const { applyWalletChange, getBalance, InsufficientFundsError } = require('../services/walletService');
 const { notify } = require('../services/notificationService');
 
@@ -74,7 +75,7 @@ router.get('/transactions', authMiddleware, async (req, res) => {
 });
 
 // POST /api/wallet/topup - Add money
-router.post('/topup', authMiddleware, async (req, res) => {
+router.post('/topup', authMiddleware, idempotent, async (req, res) => {
     try {
         if (process.env.NODE_ENV === 'production' && process.env.ALLOW_TEST_TOPUP !== 'true') {
             return res.status(503).json({ error: 'Adding money is not available yet' });
@@ -109,7 +110,7 @@ router.post('/topup', authMiddleware, async (req, res) => {
 });
 
 // POST /api/wallet/withdraw - Request a payout to a saved bank account
-router.post('/withdraw', authMiddleware, async (req, res) => {
+router.post('/withdraw', authMiddleware, idempotent, async (req, res) => {
     try {
         const amount = Number(req.body.amount);
         const { bankAccountId } = req.body;

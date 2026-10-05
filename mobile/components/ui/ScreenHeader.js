@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { IconButton } from './Button';
-import { COLORS, SPACING, TYPE } from '../../constants/config';
+import { COLORS, SPACING, TYPE, makeStyles } from '../../constants/config';
 
 // Back button, centred title, optional element on the right (keeps the title centred)
 export const ScreenHeader = ({ title, right, onBack, showBack = true }) => {
@@ -21,7 +21,7 @@ export const ScreenHeader = ({ title, right, onBack, showBack = true }) => {
     );
 };
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     header: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -31,6 +31,6 @@ const styles = StyleSheet.create({
     },
     side: { minWidth: 48, flex: 1 },
     title: { ...TYPE.heading, color: COLORS.ink, textAlign: 'center', flexShrink: 1 },
-});
+}));
 
 export default ScreenHeader;

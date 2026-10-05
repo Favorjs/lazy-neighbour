@@ -12,12 +12,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { ErrandCard } from '../../components/errand/ErrandCard';
 import { HomeTopBar } from '../../components/home/HomeTopBar';
+import { SleepingPanda } from '../../components/brand/SleepingPanda';
 import { Button, Icon, Sheet } from '../../components/ui';
 import { HomeHeaderSkeleton, ErrandListSkeleton, Skeleton } from '../../components/ui/Skeleton';
-import { COLORS, CATEGORIES, SPACING, RADIUS, TYPE } from '../../constants/config';
+import { COLORS, CATEGORIES, SPACING, RADIUS, TYPE, makeStyles, useThemeVersion } from '../../constants/config';
+import { errandEvents } from '../../services/errandEvents';
 import api from '../../services/api';
 
 export default function FeedScreen() {
+    const themeVersion = useThemeVersion();
     const router = useRouter();
     const [errands, setErrands] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -46,6 +49,16 @@ export default function FeedScreen() {
     useEffect(() => {
         fetchFeed();
     }, [selectedCategory]);
+
+    // A cancel (or any change) elsewhere shows up here immediately
+    useEffect(
+        () =>
+            errandEvents.subscribe((event) => {
+                if (event.type === 'removed') setErrands((list) => list.filter((e) => e.id !== event.id));
+                else fetchFeed();
+            }),
+        [selectedCategory]
+    );
 
     // Refresh the bell's unread count every time Home comes back into view
     useFocusEffect(
@@ -105,16 +118,19 @@ export default function FeedScreen() {
                 onLocationPress={() => router.push('/location')}
             />
 
-            <View style={styles.hello}>
-                <Text style={styles.greeting}>{firstName ? `Hi, ${firstName}` : 'Welcome'}</Text>
-                <Text style={styles.hero}></Text>
-                <Text style={styles.sub}>.</Text>
+            <View style={styles.heroCard}>
+                <View style={styles.heroTop}>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.greeting}>{firstName ? `Hi, ${firstName}` : 'Welcome'}</Text>
+                        <Text style={styles.hero}>What do you need?</Text>
+                    </View>
+                    <SleepingPanda size={88} />
+                </View>
+                <Text style={styles.sub}>Send a task to a neighbour, or pick one up and earn.</Text>
+                {sendCta}
             </View>
 
-            <View style={styles.ctas}>
-                {sendCta}
-                {runCta}
-            </View>
+            <View style={styles.runRow}>{runCta}</View>
 
             <Text style={styles.section}>Around you</Text>
             <ScrollView
@@ -134,7 +150,7 @@ export default function FeedScreen() {
                     return (
                         <Pressable
                             key={key}
-                            style={[styles.chip, on && styles.chipOn]}
+                            style={[styles.chip, { backgroundColor: cat.tint }, on && styles.chipOn]}
                             onPress={() => setSelectedCategory(on ? null : key)}
                         >
                             <Icon name={cat.icon} size={14} color={on ? COLORS.white : COLORS.ink} />
@@ -161,6 +177,7 @@ export default function FeedScreen() {
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
             <FlatList
+                extraData={themeVersion}
                 data={errands}
                 keyExtractor={(item) => item.id}
                 renderItem={({ item }) => (
@@ -192,15 +209,22 @@ export default function FeedScreen() {
     );
 }
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { flex: 1, backgroundColor: COLORS.surface },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     listContent: { paddingHorizontal: SPACING.lg, paddingBottom: SPACING.xl },
-    hello: { paddingTop: SPACING.md, gap: 4 },
-    greeting: { fontFamily: TYPE.heading.fontFamily, fontSize: 24, lineHeight: 32, color: COLORS.ink },
-    hero: { ...TYPE.hero, color: COLORS.ink },
-    sub: { ...TYPE.bodySm, color: COLORS.inkSecondary, marginTop: 4 },
-    ctas: { gap: 12, marginTop: SPACING.lg },
+    heroCard: {
+        marginTop: SPACING.md,
+        backgroundColor: COLORS.tint.yellow,
+        borderRadius: RADIUS.card,
+        padding: SPACING.md + 4,
+        gap: 12,
+    },
+    heroTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    greeting: { fontFamily: TYPE.heading.fontFamily, fontSize: 22, lineHeight: 30, color: COLORS.ink },
+    hero: { ...TYPE.hero, fontSize: 32, lineHeight: 40, color: COLORS.ink },
+    sub: { ...TYPE.bodySm, color: COLORS.ink, opacity: 0.75 },
+    runRow: { marginTop: 12 },
     section: { ...TYPE.heading, color: COLORS.ink, marginTop: SPACING.xl, marginBottom: SPACING.sm + 2 },
     chipScroll: { marginHorizontal: -SPACING.lg, marginBottom: SPACING.md },
     chips: { paddingHorizontal: SPACING.lg, gap: 8 },
@@ -219,4 +243,4 @@ const styles = StyleSheet.create({
     empty: { alignItems: 'center', paddingVertical: SPACING.xxl, gap: 6 },
     emptyTitle: { ...TYPE.heading, color: COLORS.ink },
     emptyText: { ...TYPE.bodySm, color: COLORS.inkSecondary, textAlign: 'center', paddingHorizontal: SPACING.xl },
-});
+}));

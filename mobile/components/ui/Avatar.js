@@ -1,15 +1,15 @@
 import React from 'react';
 import { View, Text, Image, StyleSheet } from 'react-native';
-import { COLORS, FONT } from '../../constants/config';
+import { COLORS, FONT, makeStyles } from '../../constants/config';
 
 // Photo, or initials on charcoal / stone. `online` adds a small green dot.
-const FALLBACKS = [COLORS.charcoal, COLORS.stone];
 
 export const Avatar = ({ source, name, size = 40, online = false, style }) => {
     const initials = name
         ? name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
         : '?';
-    const backgroundColor = FALLBACKS[name ? name.charCodeAt(0) % FALLBACKS.length : 0];
+    const fallbacks = [COLORS.charcoal, COLORS.stone];
+    const backgroundColor = fallbacks[name ? name.charCodeAt(0) % fallbacks.length : 0];
 
     return (
         <View style={[{ width: size, height: size }, style]}>
@@ -28,7 +28,7 @@ export const Avatar = ({ source, name, size = 40, online = false, style }) => {
     );
 };
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     round: { borderRadius: 9999 },
     fallback: { alignItems: 'center', justifyContent: 'center' },
     initials: { color: COLORS.white, fontFamily: FONT.bold },
@@ -43,6 +43,6 @@ const styles = StyleSheet.create({
         borderWidth: 2,
         borderColor: COLORS.white,
     },
-});
+}));
 
 export default Avatar;

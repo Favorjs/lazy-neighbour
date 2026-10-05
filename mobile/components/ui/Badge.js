@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Icon } from './Icon';
-import { STATUS_LABELS, COLORS, RADIUS, TYPE } from '../../constants/config';
+import { STATUS_LABELS, COLORS, RADIUS, TYPE, makeStyles } from '../../constants/config';
 
 // Grey pill: coloured dot + ink icon + sentence-case label. Colour lives only in the dot
 // (Disputed also colours its label).
@@ -23,7 +23,7 @@ export const Badge = ({ status, label, color, icon, size = 'md' }) => {
     );
 };
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     badge: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -38,6 +38,6 @@ const styles = StyleSheet.create({
     badgeSm: { paddingVertical: 4 },
     dot: { width: 8, height: 8, borderRadius: 4 },
     text: { ...TYPE.badge, color: COLORS.ink },
-});
+}));
 
 export default Badge;

@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
+import { View, Text, Pressable, ScrollView, Platform, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Button, Input } from '../../components/ui';
+import { Button, Input, KeyboardAware } from '../../components/ui';
 import { StepHeader } from '../../components/ui/StepHeader';
 import { Skeleton } from '../../components/ui/Skeleton';
-import { COLORS, SPACING, RADIUS, SHADOW, TYPE } from '../../constants/config';
+import { COLORS, SPACING, RADIUS, SHADOW, TYPE, makeStyles, useThemeVersion } from '../../constants/config';
 import { formatNaira, CURRENCY_SYMBOL } from '../../utils/format';
 import api from '../../services/api';
 
@@ -13,6 +13,7 @@ const MIN = 500;
 
 // Withdraw, step 1 of 4: how much?
 export default function WithdrawAmount() {
+    const themeVersion = useThemeVersion();
     const router = useRouter();
     const [balance, setBalance] = useState(null);
     const [amount, setAmount] = useState('');
@@ -33,7 +34,7 @@ export default function WithdrawAmount() {
 
     return (
         <SafeAreaView style={styles.container}>
-            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+            <KeyboardAware lift style={{ flex: 1 }}>
                 <StepHeader title="Withdraw" step={1} total={4} />
 
                 <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
@@ -75,12 +76,12 @@ export default function WithdrawAmount() {
                         onPress={() => router.push({ pathname: '/money/withdraw-bank', params: { amount: String(value) } })}
                     />
                 </View>
-            </KeyboardAvoidingView>
+            </KeyboardAware>
         </SafeAreaView>
     );
 }
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { flex: 1, backgroundColor: COLORS.surface },
     scroll: { paddingHorizontal: SPACING.lg, paddingTop: SPACING.md, paddingBottom: SPACING.xl },
     hero: { ...TYPE.hero, color: COLORS.ink, marginBottom: SPACING.lg },
@@ -92,4 +93,4 @@ const styles = StyleSheet.create({
     chip: { backgroundColor: COLORS.surfaceMuted, borderRadius: RADIUS.full, paddingVertical: 8, paddingHorizontal: 14 },
     chipText: { ...TYPE.chip, color: COLORS.ink },
     bottom: { padding: SPACING.lg, paddingTop: SPACING.md, backgroundColor: COLORS.surface, ...SHADOW.sheet },
-});
+}));

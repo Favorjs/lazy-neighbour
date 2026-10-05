@@ -5,7 +5,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { Icon, Button, ScreenHeader, Sheet } from '../components/ui';
 import { BottomModal } from '../components/ui/Sheet';
 import { RowListSkeleton } from '../components/ui/Skeleton';
-import { COLORS, SPACING, RADIUS, TYPE } from '../constants/config';
+import { COLORS, SPACING, RADIUS, TYPE, makeStyles, useThemeVersion } from '../constants/config';
 import { timeAgo } from '../utils/format';
 import api from '../services/api';
 
@@ -17,6 +17,18 @@ const TYPE_ICON = {
     WALLET: 'Wallet',
     SYSTEM: 'Bell',
 };
+
+const TINT_NAME = {
+    ERRAND_ACCEPTED: 'sky',
+    ERRAND_COMPLETED: 'mint',
+    PAYMENT_RECEIVED: 'yellow',
+    MESSAGE: 'lilac',
+    WALLET: 'yellow',
+    SYSTEM: 'peach',
+};
+
+// Read the colour at render time so it follows light / dark
+const tintFor = (type) => COLORS.tint[TINT_NAME[type]] || COLORS.surfaceMuted;
 
 const TYPE_LABEL = {
     ERRAND_ACCEPTED: 'Errand update',
@@ -31,6 +43,7 @@ const fullDate = (d) =>
     new Date(d).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' });
 
 export default function NotificationsScreen() {
+    const themeVersion = useThemeVersion();
     const router = useRouter();
     const { height } = useWindowDimensions();
     const [items, setItems] = useState([]);
@@ -101,6 +114,7 @@ export default function NotificationsScreen() {
                 <RowListSkeleton count={7} />
             ) : (
                 <FlatList
+                extraData={themeVersion}
                     data={items}
                     keyExtractor={(item) => item.id}
                     contentContainerStyle={styles.list}
@@ -120,12 +134,8 @@ export default function NotificationsScreen() {
                             onPress={() => openDetail(item)}
                             style={({ pressed }) => [styles.row, pressed && { backgroundColor: COLORS.surfaceMuted }]}
                         >
-                            <View style={[styles.disc, !item.isRead && styles.discUnread]}>
-                                <Icon
-                                    name={TYPE_ICON[item.type] || 'Bell'}
-                                    size={22}
-                                    color={!item.isRead ? COLORS.white : COLORS.ink}
-                                />
+                            <View style={[styles.disc, { backgroundColor: tintFor(item.type) }]}>
+                                <Icon name={TYPE_ICON[item.type] || 'Bell'} size={22} color={COLORS.ink} />
                             </View>
                             <View style={{ flex: 1, gap: 2 }}>
                                 <View style={styles.titleRow}>
@@ -158,8 +168,8 @@ export default function NotificationsScreen() {
                 {selected ? (
                     <View>
                         <View style={styles.detailTop}>
-                            <View style={styles.detailDisc}>
-                                <Icon name={TYPE_ICON[selected.type] || 'Bell'} size={28} color={COLORS.white} />
+                            <View style={[styles.detailDisc, { backgroundColor: tintFor(selected.type) }]}>
+                                <Icon name={TYPE_ICON[selected.type] || 'Bell'} size={28} color={COLORS.ink} />
                             </View>
                             <View style={styles.typeChip}>
                                 <Text style={styles.typeChipText}>{TYPE_LABEL[selected.type] || 'Notice'}</Text>
@@ -190,13 +200,7 @@ export default function NotificationsScreen() {
                                     }}
                                 />
                             ) : null}
-                            <Button
-                                title="Close"
-                                variant={shortcut ? 'soft' : 'primary'}
-                                block
-                                bubbleIcon="X"
-                                onPress={closeDetail}
-                            />
+                            <Text style={styles.swipeHint}>Swipe down to close</Text>
                         </View>
                     </View>
                 ) : null}
@@ -205,7 +209,7 @@ export default function NotificationsScreen() {
     );
 }
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { flex: 1, backgroundColor: COLORS.surface },
     list: { paddingHorizontal: SPACING.sm, paddingBottom: SPACING.xl, flexGrow: 1 },
     row: { flexDirection: 'row', gap: 14, padding: SPACING.md, borderRadius: RADIUS.card },
@@ -217,7 +221,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    discUnread: { backgroundColor: COLORS.ink },
     titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     title: { ...TYPE.cardTitle, color: COLORS.ink, flexShrink: 1 },
     dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.ink },
@@ -251,4 +254,5 @@ const styles = StyleSheet.create({
     detailDate: { ...TYPE.caption, color: COLORS.inkSecondary, marginTop: 4 },
     detailBody: { ...TYPE.body, color: COLORS.ink },
     detailActions: { gap: 12, marginTop: SPACING.sm },
-});
+    swipeHint: { ...TYPE.caption, color: COLORS.grey, textAlign: 'center' },
+}));

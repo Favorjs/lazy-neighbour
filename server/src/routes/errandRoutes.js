@@ -1,6 +1,7 @@
 const express = require('express');
 const { prisma } = require('../models/db');
 const { authMiddleware } = require('../middleware/authMiddleware');
+const { idempotent } = require('../middleware/idempotency');
 const { canUserTransition, getValidNextStates } = require('../services/errandStateMachine');
 const { applyWalletChange, InsufficientFundsError } = require('../services/walletService');
 const { notify } = require('../services/notificationService');
@@ -108,7 +109,7 @@ const loadForTransition = async (req, newStatus) => {
 };
 
 // POST /api/errands - Create new errand (Lazy user)
-router.post('/', authMiddleware, async (req, res) => {
+router.post('/', authMiddleware, idempotent, async (req, res) => {
     try {
         const { title, description, category, bountyAmount, locationLat, locationLng, address } = req.body;
 

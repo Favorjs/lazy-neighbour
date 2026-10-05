@@ -3,9 +3,10 @@ import { Pressable, View, Text, StyleSheet } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Icon } from './Icon';
 import { PandaSpinner } from '../brand/SleepingPanda';
-import { COLORS, RADIUS, SHADOW, TYPE } from '../../constants/config';
+import { COLORS, RADIUS, TYPE, makeStyles } from '../../constants/config';
+import { useSingleFlight } from '../../utils/singleFlight';
 
-// Pill buttons that sink onto a 4px ledge when pressed.
+// Flat pill buttons (no shadow); they dim slightly while pressed.
 // primary: black (the one main action per screen) · secondary: green (Release payment only)
 // soft: grey (default) · ghost: underlined text link
 export const Button = ({
@@ -41,10 +42,11 @@ export const Button = ({
 
     const bubbleIconColor = variant === 'secondary' ? COLORS.green : COLORS.ink;
 
-    const handlePress = () => {
+    // A second tap while the first is still running (or just after) is ignored
+    const handlePress = useSingleFlight(() => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        onPress?.();
-    };
+        return onPress?.();
+    });
 
     if (variant === 'ghost') {
         return (
@@ -73,7 +75,7 @@ export const Button = ({
                 block && styles.block,
                 block && { paddingRight: small ? 4 : 8 },
                 { backgroundColor: fill },
-                filled && !isDisabled && (pressed ? { transform: [{ translateY: 4 }] } : SHADOW.press),
+                filled && !isDisabled && pressed && { opacity: 0.85 },
                 !filled && pressed && !isDisabled && { backgroundColor: COLORS.surfacePressed },
                 style,
             ]}
@@ -100,13 +102,16 @@ export const Button = ({
 };
 
 // 48px grey circle (call, chat)
-export const IconButton = ({ icon, onPress, label, size = 48, style }) => (
+export const IconButton = ({ icon, onPress, label, size = 48, style }) => {
+    const press = useSingleFlight(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        return onPress?.();
+    }, 350);
+
+    return (
     <Pressable
         accessibilityLabel={label}
-        onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            onPress?.();
-        }}
+        onPress={press}
         style={({ pressed }) => [
             {
                 width: size,
@@ -121,27 +126,32 @@ export const IconButton = ({ icon, onPress, label, size = 48, style }) => (
     >
         <Icon name={icon} size={20} />
     </Pressable>
-);
+    );
+};
 
 // 60px black circle with a white plus, on the press ledge: Send an errand
-export const Fab = ({ onPress, icon = 'Plus', label = 'Send an errand', style }) => (
+export const Fab = ({ onPress, icon = 'Plus', label = 'Send an errand', style }) => {
+    const press = useSingleFlight(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        return onPress?.();
+    }, 600);
+
+    return (
     <Pressable
         accessibilityLabel={label}
-        onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            onPress?.();
-        }}
+        onPress={press}
         style={({ pressed }) => [
             styles.fab,
-            pressed ? { transform: [{ translateY: 4 }] } : SHADOW.press,
+            pressed && { opacity: 0.85 },
             style,
         ]}
     >
         <Icon name={icon} size={26} color={COLORS.white} />
     </Pressable>
-);
+    );
+};
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     base: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -179,6 +189,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-});
+}));
 
 export default Button;

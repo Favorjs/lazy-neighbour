@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Icon } from '../ui/Icon';
-import { COLORS, CATEGORIES, SPACING, RADIUS, TYPE } from '../../constants/config';
+import { COLORS, CATEGORIES, SPACING, RADIUS, TYPE, makeStyles } from '../../constants/config';
 
 // Four-up grid of category tiles. Selected: the tile turns black, tilts -2 degrees.
 export const CategoryPicker = ({ selected, onSelect, title = 'What kind of errand?', style }) => {
@@ -24,7 +24,7 @@ export const CategoryPicker = ({ selected, onSelect, title = 'What kind of erran
                             accessibilityState={{ selected: on }}
                             style={[styles.tile, on && styles.tileOn]}
                         >
-                            <View style={[styles.disc, on && { backgroundColor: COLORS.white }]}>
+                            <View style={[styles.disc, { backgroundColor: category.tint }, on && { backgroundColor: COLORS.white }]}>
                                 <Icon name={category.icon} size={24} color={COLORS.ink} />
                             </View>
                             <Text style={[styles.label, on && { color: COLORS.white }]} numberOfLines={2}>
@@ -38,7 +38,7 @@ export const CategoryPicker = ({ selected, onSelect, title = 'What kind of erran
     );
 };
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { marginBottom: SPACING.md },
     title: { ...TYPE.heading, color: COLORS.ink, marginBottom: SPACING.sm + 2 },
     grid: { flexDirection: 'row', gap: 10 },
@@ -68,6 +68,6 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     label: { ...TYPE.chip, color: COLORS.ink, textAlign: 'center' },
-});
+}));
 
 export default CategoryPicker;

@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
-import { View, Text, ScrollView, Pressable, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, ScrollView, Pressable, Platform, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
-import { Input, Icon, ScreenHeader, Sheet } from '../components/ui';
+import { Input, Icon, ScreenHeader, Sheet, KeyboardAware } from '../components/ui';
 import { Skeleton } from '../components/ui/Skeleton';
-import { COLORS, SPACING, RADIUS, TYPE } from '../constants/config';
+import { COLORS, SPACING, RADIUS, TYPE, makeStyles, useThemeVersion } from '../constants/config';
 import { setSavedLocation, getSavedLocation, getRecentPlaces, addRecentPlace } from '../services/locationStore';
 
 const describePlace = (place) => {
@@ -16,6 +16,7 @@ const describePlace = (place) => {
 };
 
 export default function LocationScreen() {
+    const themeVersion = useThemeVersion();
     const router = useRouter();
     const saved = getSavedLocation();
     const [query, setQuery] = useState('');
@@ -55,32 +56,45 @@ export default function LocationScreen() {
         }
     };
 
-    // 2. Search for an area or address
-    const search = async () => {
+    // 2. Suggestions appear as you type (after a short pause), no Search button needed
+    const requestId = useRef(0);
+
+    useEffect(() => {
         const text = query.trim();
-        if (text.length < 3) return;
+
+        if (text.length < 3) {
+            requestId.current += 1; // drop any search still in flight
+            setResults(null);
+            setSearching(false);
+            return;
+        }
 
         setSearching(true);
-        try {
-            const matches = (await Location.geocodeAsync(text)).slice(0, 5);
-            const named = await Promise.all(
-                matches.map(async (m) => {
-                    const [found] = await Location.reverseGeocodeAsync({ latitude: m.latitude, longitude: m.longitude });
-                    return {
-                        label: describePlace(found) || text,
-                        latitude: m.latitude,
-                        longitude: m.longitude,
-                    };
-                })
-            );
-            // Drop duplicates that came back with the same name
-            setResults(named.filter((p, i, a) => a.findIndex((x) => x.label === p.label) === i));
-        } catch (error) {
-            setResults([]);
-        } finally {
-            setSearching(false);
-        }
-    };
+        const id = ++requestId.current;
+
+        const timer = setTimeout(async () => {
+            try {
+                const matches = (await Location.geocodeAsync(text)).slice(0, 5);
+                const named = await Promise.all(
+                    matches.map(async (m) => {
+                        const [found] = await Location.reverseGeocodeAsync({
+                            latitude: m.latitude,
+                            longitude: m.longitude,
+                        });
+                        return { label: describePlace(found) || text, latitude: m.latitude, longitude: m.longitude };
+                    })
+                );
+                if (id !== requestId.current) return; // a newer keystroke took over
+                setResults(named.filter((p, i, arr) => arr.findIndex((x) => x.label === p.label) === i));
+            } catch (error) {
+                if (id === requestId.current) setResults([]);
+            } finally {
+                if (id === requestId.current) setSearching(false);
+            }
+        }, 400);
+
+        return () => clearTimeout(timer);
+    }, [query]);
 
     const PlaceRow = ({ place, icon = 'MapPin' }) => (
         <Pressable
@@ -96,32 +110,20 @@ export default function LocationScreen() {
 
     return (
         <SafeAreaView style={styles.container}>
-            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+            <KeyboardAware style={{ flex: 1 }}>
                 <ScreenHeader title="Change location" />
 
-                <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+                <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled"
+                    automaticallyAdjustKeyboardInsets>
                     <Input
                         placeholder="Search an area or address"
                         value={query}
-                        onChangeText={(t) => {
-                            setQuery(t);
-                            if (!t) setResults(null);
-                        }}
+                        onChangeText={setQuery}
                         leftIcon="Search"
                         pill
                         autoCapitalize="words"
                         style={{ marginBottom: SPACING.sm }}
-                        inputStyle={{}}
                     />
-                    {/* Search runs on the keyboard's return key via this hidden-looking button row */}
-                    <Pressable
-                        style={[styles.searchBtn, query.trim().length < 3 && { opacity: 0.4 }]}
-                        disabled={query.trim().length < 3 || searching}
-                        onPress={search}
-                    >
-                        <Text style={styles.searchBtnText}>{searching ? 'Searching...' : 'Search'}</Text>
-                    </Pressable>
-
                     <Pressable
                         style={({ pressed }) => [styles.row, styles.current, pressed && { opacity: 0.85 }]}
                         onPress={useCurrent}
@@ -149,7 +151,7 @@ export default function LocationScreen() {
                             <Text style={styles.section}>Results</Text>
                             {results.length === 0 ? (
                                 <Text style={styles.empty}>
-                                    We could not find that place. Try the area name and city, like "Lekki, Lagos".
+                                    No match yet. Keep typing, or try the area and city, like "Lekki, Lagos".
                                 </Text>
                             ) : (
                                 results.map((p) => <PlaceRow key={`${p.latitude},${p.longitude}`} place={p} />)
@@ -164,23 +166,14 @@ export default function LocationScreen() {
                         </View>
                     ) : null}
                 </ScrollView>
-            </KeyboardAvoidingView>
+            </KeyboardAware>
         </SafeAreaView>
     );
 }
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { flex: 1, backgroundColor: COLORS.surface },
     scroll: { paddingHorizontal: SPACING.lg, paddingBottom: SPACING.xxl },
-    searchBtn: {
-        alignSelf: 'flex-end',
-        backgroundColor: COLORS.surfaceMuted,
-        borderRadius: RADIUS.full,
-        paddingVertical: 8,
-        paddingHorizontal: 18,
-        marginBottom: SPACING.md,
-    },
-    searchBtnText: { ...TYPE.chip, color: COLORS.ink },
     row: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: SPACING.sm + 4, borderRadius: RADIUS.tile },
     current: { backgroundColor: COLORS.surfaceMuted },
     disc: {
@@ -196,4 +189,4 @@ const styles = StyleSheet.create({
     rowText: { ...TYPE.cardTitle, fontFamily: TYPE.label.fontFamily, color: COLORS.ink, flex: 1 },
     section: { ...TYPE.heading, color: COLORS.ink, marginBottom: SPACING.xs },
     empty: { ...TYPE.bodySm, color: COLORS.inkSecondary, paddingVertical: SPACING.md },
-});
+}));

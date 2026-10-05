@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { View, Text, Pressable, ScrollView, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
+import { View, Text, Pressable, ScrollView, Platform, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Button, Input } from '../../components/ui';
+import { Button, Input, KeyboardAware } from '../../components/ui';
 import { StepHeader } from '../../components/ui/StepHeader';
-import { COLORS, SPACING, RADIUS, SHADOW, TYPE } from '../../constants/config';
+import { COLORS, SPACING, RADIUS, SHADOW, TYPE, makeStyles, useThemeVersion } from '../../constants/config';
 import { formatNaira, CURRENCY_SYMBOL } from '../../utils/format';
 
 const QUICK = [1000, 2000, 5000, 10000];
@@ -13,6 +13,7 @@ const MAX = 1000000;
 
 // Add money, step 1 of 3: how much?
 export default function AddMoneyAmount() {
+    const themeVersion = useThemeVersion();
     const router = useRouter();
     const { returnTo } = useLocalSearchParams();
     const [amount, setAmount] = useState('');
@@ -23,7 +24,7 @@ export default function AddMoneyAmount() {
 
     return (
         <SafeAreaView style={styles.container}>
-            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+            <KeyboardAware lift style={{ flex: 1 }}>
                 <StepHeader title="Add money" step={1} total={3} />
 
                 <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
@@ -60,12 +61,12 @@ export default function AddMoneyAmount() {
                         onPress={() => router.push({ pathname: '/money/add-review', params: { amount: String(value), returnTo } })}
                     />
                 </View>
-            </KeyboardAvoidingView>
+            </KeyboardAware>
         </SafeAreaView>
     );
 }
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { flex: 1, backgroundColor: COLORS.surface },
     scroll: { paddingHorizontal: SPACING.lg, paddingTop: SPACING.md, paddingBottom: SPACING.xl },
     hero: { ...TYPE.hero, color: COLORS.ink, marginBottom: SPACING.lg },
@@ -76,4 +77,4 @@ const styles = StyleSheet.create({
     chip: { backgroundColor: COLORS.surfaceMuted, borderRadius: RADIUS.full, paddingVertical: 10, paddingHorizontal: 16 },
     chipText: { ...TYPE.chip, color: COLORS.ink },
     bottom: { padding: SPACING.lg, paddingTop: SPACING.md, backgroundColor: COLORS.surface, ...SHADOW.sheet },
-});
+}));

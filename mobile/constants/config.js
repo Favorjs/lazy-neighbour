@@ -1,6 +1,7 @@
 // API Configuration
 import Constants from 'expo-constants';
-import { Appearance } from 'react-native';
+import { useSyncExternalStore } from 'react';
+import { Appearance, StyleSheet } from 'react-native';
 import Storage from 'expo-sqlite/kv-store';
 
 const THEME_KEY = 'lazyneighbour.theme';
@@ -20,31 +21,6 @@ export const API_URL = __DEV__
 // Lazy Neighbour design system: black, white and grey, Poppins, playful shapes.
 // Green and clay are small signals only.
 // ---------------------------------------------------------------------------
-
-// Appearance: 'system' | 'light' | 'dark'. Read synchronously at start-up so every StyleSheet
-// is built with the right palette; changing it reloads the app (see settings.js).
-let storedPref = 'system';
-try {
-    storedPref = Storage.getItemSync(THEME_KEY) || 'system';
-} catch (e) {
-    storedPref = 'system';
-}
-export const THEME_PREF = ['light', 'dark', 'system'].includes(storedPref) ? storedPref : 'system';
-
-if (THEME_PREF !== 'system') {
-    // Keep native pieces (keyboard, system sheets, tab bar) in step with the chosen look
-    Appearance.setColorScheme(THEME_PREF);
-}
-
-export const IS_DARK = (THEME_PREF === 'system' ? Appearance.getColorScheme() : THEME_PREF) === 'dark';
-
-export const setThemePreference = (pref) => {
-    try {
-        Storage.setItemSync(THEME_KEY, pref);
-    } catch (e) {
-        // ignore: the choice just will not stick
-    }
-};
 
 // The two palettes use the same roles. In dark mode the neutrals swap sides, so anything written as
 // "white on ink" or "ink on surface" stays readable without per-screen changes.
@@ -70,51 +46,141 @@ const LIGHT = {
 };
 
 const DARK = {
-    white: '#0B0B0C',
+    white: '#1A1B1F',
     black: '#FFFFFF',
-    grey: '#8C8C8C',
+    grey: '#92939A',
     green: '#7BD35C',
     clay: '#E58B63',
-    clayTint: '#3A2118',
+    clayTint: '#47281D',
     ochre: '#E0A93A',
 
-    surface: '#0B0B0C',
-    surfaceMuted: '#1E1E20',
-    surfacePressed: '#2C2C2F',
-    line: '#2A2A2D',
+    surface: '#1A1B1F',
+    surfaceMuted: '#26282D',
+    surfacePressed: '#33353B',
+    line: '#33353B',
 
     ink: '#FFFFFF',
-    inkSecondary: '#A6A6A6',
+    inkSecondary: '#B4B5BB',
     charcoal: '#D9D9D9',
     stone: '#B5B5B5',
     focusRing: '#FFFFFF',
 };
 
-const BASE = IS_DARK ? DARK : LIGHT;
-
-export const COLORS = {
-    ...BASE,
-
-    // --- Legacy names, mapped onto the new palette so older code keeps working ---
-    primary: BASE.ink,
-    primaryLight: BASE.charcoal,
-    primaryDark: BASE.ink,
-    accent: BASE.ink,
-    accentLight: BASE.surfacePressed,
-    pending: BASE.ochre,
-    active: BASE.ink,
-    completed: BASE.green,
-    disputed: BASE.clay,
-    bgDark: BASE.surface,
-    bgCard: BASE.surface,
-    bgElevated: BASE.surfaceMuted,
-    textPrimary: BASE.ink,
-    textSecondary: BASE.inkSecondary,
-    textMuted: BASE.grey,
-    success: BASE.green,
-    error: BASE.clay,
-    warning: BASE.ochre,
+// Soft accent tints for backgrounds behind icons, cards and highlights. Text on them is always `ink`.
+const LIGHT_TINTS = {
+    yellow: '#FFE680',
+    mint: '#BDEBCB',
+    lilac: '#DCD0FF',
+    peach: '#FFD3BE',
+    sky: '#C9E4FF',
 };
+
+const DARK_TINTS = {
+    yellow: '#5A4D1C',
+    mint: '#22493A',
+    lilac: '#3C3363',
+    peach: '#5A3622',
+    sky: '#21405F',
+};
+
+const buildPalette = (dark) => {
+    const base = dark ? DARK : LIGHT;
+    return {
+        ...base,
+        tint: dark ? DARK_TINTS : LIGHT_TINTS,
+
+        // --- Legacy names, mapped onto the new palette so older code keeps working ---
+        primary: base.ink,
+        primaryLight: base.charcoal,
+        primaryDark: base.ink,
+        accent: base.ink,
+        accentLight: base.surfacePressed,
+        pending: base.ochre,
+        active: base.ink,
+        completed: base.green,
+        disputed: base.clay,
+        bgDark: base.surface,
+        bgCard: base.surface,
+        bgElevated: base.surfaceMuted,
+        textPrimary: base.ink,
+        textSecondary: base.inkSecondary,
+        textMuted: base.grey,
+        success: base.green,
+        error: base.clay,
+        warning: base.ochre,
+    };
+};
+
+// ---------------------------------------------------------------------------
+// Live theme. COLORS is ONE object whose values are swapped in place when the look changes,
+// so every `COLORS.ink` read at render time is current. Styles are built lazily by makeStyles
+// and rebuilt on a change; screens subscribe with useThemeVersion() so they re-render.
+// ---------------------------------------------------------------------------
+export const COLORS = {};
+export const THEME = { pref: 'system', isDark: false, version: 0 };
+
+const themeListeners = new Set();
+
+const resolveDark = (pref) => (pref === 'system' ? Appearance.getColorScheme() : pref) === 'dark';
+
+// pref: 'system' | 'light' | 'dark'
+export const applyTheme = (pref, { persist = true } = {}) => {
+    THEME.pref = pref;
+    THEME.isDark = resolveDark(pref);
+    Object.assign(COLORS, buildPalette(THEME.isDark));
+
+    // Keep native pieces (keyboard, system sheets, tab bar) in step with the chosen look
+    Appearance.setColorScheme(pref === 'system' ? null : pref);
+
+    THEME.version += 1;
+    if (persist) {
+        try {
+            Storage.setItemSync(THEME_KEY, pref);
+        } catch (e) {
+            // ignore: the choice just will not stick
+        }
+    }
+    themeListeners.forEach((fn) => fn());
+};
+
+// Subscribe a component so it re-renders when the theme changes. Returns the version (handy as FlatList extraData).
+const subscribeTheme = (fn) => {
+    themeListeners.add(fn);
+    return () => themeListeners.delete(fn);
+};
+const getThemeVersion = () => THEME.version;
+
+export const useThemeVersion = () => useSyncExternalStore(subscribeTheme, getThemeVersion);
+
+// Like StyleSheet.create, but the styles are rebuilt whenever the theme changes.
+//   const styles = makeStyles(() => ({ box: { backgroundColor: COLORS.surface } }));
+export const makeStyles = (factory) => {
+    let cache = null;
+    let builtFor = -1;
+    const current = () => {
+        if (builtFor !== THEME.version) {
+            cache = StyleSheet.create(factory());
+            builtFor = THEME.version;
+        }
+        return cache;
+    };
+    return new Proxy({}, { get: (_, key) => current()[key] });
+};
+
+let savedPref = 'system';
+try {
+    savedPref = Storage.getItemSync(THEME_KEY) || 'system';
+} catch (e) {
+    savedPref = 'system';
+}
+applyTheme(['light', 'dark', 'system'].includes(savedPref) ? savedPref : 'system', { persist: false });
+
+// Follow the phone when the choice is "System"
+Appearance.addChangeListener(() => {
+    if (THEME.pref === 'system' && resolveDark('system') !== THEME.isDark) {
+        applyTheme('system', { persist: false });
+    }
+});
 
 // Poppins, loaded in app/_layout.js. React Native needs one family name per weight.
 export const FONT = {
@@ -145,24 +211,24 @@ export const TYPE = {
 
 // Category icons are Lucide names (see components/ui/Icon.js). Categories carry no colour.
 export const CATEGORIES = {
-    FOOD: { label: 'Food & drinks', icon: 'Utensils', color: COLORS.ink },
-    STORE: { label: 'Store run', icon: 'ShoppingBag', color: COLORS.ink },
-    HOME: { label: 'Home help', icon: 'House', color: COLORS.ink },
-    QUICK: { label: 'Quick task', icon: 'Zap', color: COLORS.ink },
+    FOOD: { label: 'Food & drinks', icon: 'Utensils', get color() { return COLORS.ink; }, get tint() { return COLORS.tint.peach; } },
+    STORE: { label: 'Store run', icon: 'ShoppingBag', get color() { return COLORS.ink; }, get tint() { return COLORS.tint.sky; } },
+    HOME: { label: 'Home help', icon: 'House', get color() { return COLORS.ink; }, get tint() { return COLORS.tint.mint; } },
+    QUICK: { label: 'Quick task', icon: 'Zap', get color() { return COLORS.ink; }, get tint() { return COLORS.tint.lilac; } },
 };
 
 // Fixed status words. The dot is the only colour; Disputed also colours its label.
 export const STATUS_LABELS = {
-    PENDING: { label: 'Waiting for runner', color: COLORS.ochre, icon: 'Hourglass' },
-    ACTIVE: { label: 'In progress', color: COLORS.black, icon: 'Footprints' },
-    COMPLETED: { label: 'Completed', color: COLORS.green, icon: 'CircleCheck' },
-    RELEASED: { label: 'Paid', color: COLORS.green, icon: 'Wallet' },
-    DISPUTED: { label: 'Disputed', color: COLORS.clay, icon: 'CircleAlert' },
-    CANCELLED: { label: 'Cancelled', color: COLORS.inkSecondary, icon: 'CircleX' },
+    PENDING: { label: 'Waiting for runner', get color() { return COLORS.ochre; }, icon: 'Hourglass' },
+    ACTIVE: { label: 'In progress', get color() { return COLORS.black; }, icon: 'Footprints' },
+    COMPLETED: { label: 'Completed', get color() { return COLORS.green; }, icon: 'CircleCheck' },
+    RELEASED: { label: 'Paid', get color() { return COLORS.green; }, icon: 'Wallet' },
+    DISPUTED: { label: 'Disputed', get color() { return COLORS.clay; }, icon: 'CircleAlert' },
+    CANCELLED: { label: 'Cancelled', get color() { return COLORS.inkSecondary; }, icon: 'CircleX' },
 };
 
 // Where the Help and support screen sends people (change this to your real inbox)
-export const SUPPORT_EMAIL = 'support@lazyneighbour.app';
+export const SUPPORT_EMAIL = 'support@lazyneighbour.com';
 
 // Smallest bounty a neighbour can post, in naira (the server enforces the same floor)
 export const MIN_BOUNTY = 100;

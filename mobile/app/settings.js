@@ -4,15 +4,13 @@ import {
     Text,
     ScrollView,
     Pressable,
-    KeyboardAvoidingView,
     Platform,
     StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { reloadAppAsync } from 'expo';
-import { Button, Input, Icon, ScreenHeader, Sheet } from '../components/ui';
-import { COLORS, SPACING, RADIUS, TYPE, THEME_PREF, setThemePreference } from '../constants/config';
+import { Button, Input, Icon, ScreenHeader, Sheet, KeyboardAware } from '../components/ui';
+import { COLORS, SPACING, RADIUS, TYPE, THEME, applyTheme, makeStyles, useThemeVersion } from '../constants/config';
 import api from '../services/api';
 
 const APPEARANCE = [
@@ -22,6 +20,7 @@ const APPEARANCE = [
 ];
 
 export default function SettingsScreen() {
+    const themeVersion = useThemeVersion();
     const router = useRouter();
     const [user, setUser] = useState(null);
     const [deleting, setDeleting] = useState(false);
@@ -32,27 +31,10 @@ export default function SettingsScreen() {
         api.getStoredUser().then(setUser).catch(() => {});
     }, []);
 
+    // Appearance changes instantly: every screen re-renders in the new look, no restart
     const chooseAppearance = (key) => {
-        if (key === THEME_PREF) return;
-
-        Sheet.alert(
-            `Switch to ${key} appearance?`,
-            'The app restarts for a moment so every screen picks up the new look.',
-            [
-                {
-                    text: 'Switch and restart',
-                    onPress: async () => {
-                        setThemePreference(key);
-                        try {
-                            await reloadAppAsync();
-                        } catch (error) {
-                            Sheet.alert('Restart the app', 'Close and reopen Lazy Neighbour to see the new look.');
-                        }
-                    },
-                },
-                { text: 'Not now', style: 'cancel' },
-            ]
-        );
+        if (key === THEME.pref) return;
+        applyTheme(key);
     };
 
     const signOut = () => {
@@ -99,15 +81,16 @@ export default function SettingsScreen() {
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
-            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+            <KeyboardAware style={{ flex: 1 }}>
                 <ScreenHeader title="Settings" />
 
-                <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled"
+                    automaticallyAdjustKeyboardInsets showsVerticalScrollIndicator={false}>
                     {/* Appearance */}
                     <Text style={styles.section}>Appearance</Text>
                     <View style={styles.tiles}>
                         {APPEARANCE.map((a) => {
-                            const on = a.key === THEME_PREF;
+                            const on = a.key === THEME.pref;
                             return (
                                 <Pressable
                                     key={a.key}
@@ -200,12 +183,12 @@ export default function SettingsScreen() {
 
                     <Text style={styles.version}>Lazy Neighbour 1.0.0</Text>
                 </ScrollView>
-            </KeyboardAvoidingView>
+            </KeyboardAware>
         </SafeAreaView>
     );
 }
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { flex: 1, backgroundColor: COLORS.surface },
     scroll: { paddingHorizontal: SPACING.lg, paddingBottom: SPACING.xxl },
     section: { ...TYPE.heading, color: COLORS.ink, marginTop: SPACING.md, marginBottom: SPACING.sm + 2 },
@@ -263,4 +246,4 @@ const styles = StyleSheet.create({
     deleteTitle: { ...TYPE.heading, color: COLORS.clay },
     deleteText: { ...TYPE.bodySm, color: COLORS.inkSecondary },
     version: { ...TYPE.caption, color: COLORS.inkSecondary, textAlign: 'center', marginTop: SPACING.xl },
-});
+}));

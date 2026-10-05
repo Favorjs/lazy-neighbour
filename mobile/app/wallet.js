@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Button, Icon, ScreenHeader, Sheet } from '../components/ui';
 import { WalletSkeleton } from '../components/ui/Skeleton';
-import { COLORS, SPACING, RADIUS, TYPE } from '../constants/config';
+import { COLORS, SPACING, RADIUS, TYPE, makeStyles, useThemeVersion } from '../constants/config';
 import { formatNaira, timeAgo } from '../utils/format';
 import api from '../services/api';
 
@@ -17,6 +17,7 @@ const TX_ICON = {
 };
 
 export default function WalletScreen() {
+    const themeVersion = useThemeVersion();
     const router = useRouter();
     const [wallet, setWallet] = useState(null);
     const [history, setHistory] = useState([]);
@@ -96,7 +97,7 @@ export default function WalletScreen() {
                             const positive = t.amount > 0;
                             return (
                                 <View key={t.id} style={styles.txRow}>
-                                    <View style={styles.txDisc}>
+                                    <View style={[styles.txDisc, { backgroundColor: positive ? COLORS.tint.mint : COLORS.tint.peach }]}>
                                         <Icon name={TX_ICON[t.type] || 'Wallet'} size={20} />
                                     </View>
                                     <View style={{ flex: 1 }}>
@@ -119,7 +120,7 @@ export default function WalletScreen() {
     );
 }
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { flex: 1, backgroundColor: COLORS.surface },
     scroll: { paddingHorizontal: SPACING.lg, paddingBottom: SPACING.xxl },
     balanceCard: { backgroundColor: COLORS.ink, borderRadius: RADIUS.card, padding: SPACING.lg, gap: 4 },
@@ -153,4 +154,4 @@ const styles = StyleSheet.create({
     },
     emptyTitle: { ...TYPE.heading, color: COLORS.ink },
     emptyText: { ...TYPE.bodySm, color: COLORS.inkSecondary, textAlign: 'center' },
-});
+}));

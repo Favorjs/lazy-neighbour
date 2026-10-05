@@ -7,3 +7,4 @@ export { Icon } from './Icon';
 export { Sheet, SheetHost } from './Sheet';
 export { Skeleton } from './Skeleton';
 export { ScreenHeader } from './ScreenHeader';
+export { KeyboardAware } from './KeyboardAware';

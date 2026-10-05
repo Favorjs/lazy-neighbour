@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Badge, Avatar, Button, Icon } from '../ui';
-import { COLORS, CATEGORIES, SPACING, RADIUS, SHADOW, TYPE } from '../../constants/config';
+import { COLORS, CATEGORIES, SPACING, RADIUS, SHADOW, TYPE, makeStyles } from '../../constants/config';
 import { formatNaira } from '../../utils/format';
 
 export const formatTime = (dateString) => {
@@ -49,7 +49,7 @@ export const ErrandCard = ({ errand, onPress, onAccept, onChat, currentUserId, a
             <Pressable onPress={handlePress} style={[styles.card, styles.trackingCard]}>
                 <View style={styles.topRow}>
                     <View style={styles.catRow}>
-                        <View style={styles.catDisc}>
+                        <View style={[styles.catDisc, { backgroundColor: category.tint }]}>
                             <Icon name={category.icon} size={18} />
                         </View>
                         <Text style={styles.catName}>{category.label}</Text>
@@ -88,7 +88,7 @@ export const ErrandCard = ({ errand, onPress, onAccept, onChat, currentUserId, a
         <Pressable onPress={handlePress} style={styles.card}>
             <View style={styles.topRow}>
                 <View style={styles.catRow}>
-                    <View style={styles.catDisc}>
+                    <View style={[styles.catDisc, { backgroundColor: category.tint }]}>
                         <Icon name={category.icon} size={18} />
                     </View>
                     <Text style={styles.catName}>{category.label}</Text>
@@ -147,7 +147,7 @@ export const ErrandCard = ({ errand, onPress, onAccept, onChat, currentUserId, a
     );
 };
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     card: {
         backgroundColor: COLORS.surface,
         borderRadius: RADIUS.card,
@@ -215,6 +215,6 @@ const styles = StyleSheet.create({
     seg: { flex: 1, height: 6, borderRadius: RADIUS.detail, backgroundColor: COLORS.surfacePressed },
     segOn: { backgroundColor: COLORS.ink },
     meta: { ...TYPE.caption, color: COLORS.inkSecondary },
-});
+}));
 
 export default ErrandCard;

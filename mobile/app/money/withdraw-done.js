@@ -4,11 +4,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Button, Icon } from '../../components/ui';
 import { StepHeader } from '../../components/ui/StepHeader';
-import { COLORS, SPACING, RADIUS, SHADOW, TYPE } from '../../constants/config';
+import { COLORS, SPACING, RADIUS, SHADOW, TYPE, makeStyles, useThemeVersion } from '../../constants/config';
 import { formatNaira } from '../../utils/format';
 
 // Withdraw, step 4 of 4: requested
 export default function WithdrawDone() {
+    const themeVersion = useThemeVersion();
     const router = useRouter();
     const { amount, balance, bank } = useLocalSearchParams();
 
@@ -35,7 +36,7 @@ export default function WithdrawDone() {
     );
 }
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { flex: 1, backgroundColor: COLORS.surface },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: SPACING.xl, gap: 6 },
     disc: {
@@ -51,4 +52,4 @@ const styles = StyleSheet.create({
     sub: { ...TYPE.bodySm, color: COLORS.inkSecondary, textAlign: 'center' },
     balance: { ...TYPE.amountXl, color: COLORS.ink },
     bottom: { padding: SPACING.lg, paddingTop: SPACING.md, backgroundColor: COLORS.surface, ...SHADOW.sheet },
-});
+}));

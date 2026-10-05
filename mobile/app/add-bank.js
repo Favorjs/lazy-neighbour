@@ -4,14 +4,13 @@ import {
     Text,
     ScrollView,
     Pressable,
-    KeyboardAvoidingView,
     Platform,
     StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Button, Input, ScreenHeader, Sheet } from '../components/ui';
-import { COLORS, SPACING, RADIUS, SHADOW, TYPE } from '../constants/config';
+import { Button, Input, ScreenHeader, Sheet, KeyboardAware } from '../components/ui';
+import { COLORS, SPACING, RADIUS, SHADOW, TYPE, makeStyles, useThemeVersion } from '../constants/config';
 import api from '../services/api';
 
 const POPULAR_BANKS = [
@@ -20,6 +19,7 @@ const POPULAR_BANKS = [
 ];
 
 export default function AddBankScreen() {
+    const themeVersion = useThemeVersion();
     const router = useRouter();
     const [bankName, setBankName] = useState('');
     const [accountNumber, setAccountNumber] = useState('');
@@ -58,10 +58,11 @@ export default function AddBankScreen() {
 
     return (
         <SafeAreaView style={styles.container}>
-            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+            <KeyboardAware style={{ flex: 1 }}>
                 <ScreenHeader title="Add bank account" />
 
-                <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+                <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled"
+                    automaticallyAdjustKeyboardInsets>
                     <Text style={styles.label}>Pick your bank</Text>
                     <View style={styles.chips}>
                         {POPULAR_BANKS.map((b) => {
@@ -110,12 +111,12 @@ export default function AddBankScreen() {
                 <View style={styles.bottom}>
                     <Button title="Save bank account" variant="primary" block disabled={!filled} loading={loading} onPress={save} />
                 </View>
-            </KeyboardAvoidingView>
+            </KeyboardAware>
         </SafeAreaView>
     );
 }
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { flex: 1, backgroundColor: COLORS.surface },
     scroll: { paddingHorizontal: SPACING.lg, paddingBottom: SPACING.xl },
     label: { ...TYPE.heading, color: COLORS.ink, marginBottom: SPACING.sm + 2 },
@@ -125,4 +126,4 @@ const styles = StyleSheet.create({
     chipText: { ...TYPE.chip, color: COLORS.ink },
     note: { ...TYPE.caption, color: COLORS.inkSecondary },
     bottom: { padding: SPACING.lg, paddingTop: SPACING.md, backgroundColor: COLORS.surface, ...SHADOW.sheet },
-});
+}));

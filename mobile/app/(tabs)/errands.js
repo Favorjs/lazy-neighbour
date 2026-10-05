@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
     View,
     Text,
@@ -8,11 +8,12 @@ import {
     Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { ErrandCard } from '../../components/errand/ErrandCard';
 import { Button, Icon } from '../../components/ui';
 import { ErrandListSkeleton } from '../../components/ui/Skeleton';
-import { COLORS, SPACING, RADIUS, TYPE } from '../../constants/config';
+import { COLORS, SPACING, RADIUS, TYPE, makeStyles, useThemeVersion } from '../../constants/config';
+import { errandEvents } from '../../services/errandEvents';
 import api from '../../services/api';
 
 const TABS = [
@@ -21,6 +22,7 @@ const TABS = [
 ];
 
 export default function ErrandsScreen() {
+    const themeVersion = useThemeVersion();
     const router = useRouter();
     const [errands, setErrands] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -35,7 +37,8 @@ export default function ErrandsScreen() {
     const fetchErrands = async () => {
         try {
             const data = await api.getMyErrands(activeTab);
-            setErrands(data.errands || []);
+            // Cancelled errands are not shown
+            setErrands((data.errands || []).filter((e) => e.status !== 'CANCELLED'));
         } catch (error) {
             console.error('Failed to fetch errands:', error);
         } finally {
@@ -48,6 +51,28 @@ export default function ErrandsScreen() {
         setLoading(true);
         fetchErrands();
     }, [activeTab]);
+
+    // Reload quietly whenever you come back to this tab (the first focus is covered by the load above)
+    const firstFocus = useRef(true);
+    useFocusEffect(
+        useCallback(() => {
+            if (firstFocus.current) {
+                firstFocus.current = false;
+                return;
+            }
+            fetchErrands();
+        }, [activeTab])
+    );
+
+    // A cancel (or any change) elsewhere shows up here immediately
+    useEffect(
+        () =>
+            errandEvents.subscribe((event) => {
+                if (event.type === 'removed') setErrands((list) => list.filter((e) => e.id !== event.id));
+                else fetchErrands();
+            }),
+        [activeTab]
+    );
 
     const onRefresh = useCallback(() => {
         setRefreshing(true);
@@ -72,7 +97,7 @@ export default function ErrandsScreen() {
 
     // Big, obvious call to action at the top of whichever tab you are on
     const StartCta = (
-        <View style={styles.cta}>
+        <View style={[styles.cta, { backgroundColor: sent ? COLORS.tint.yellow : COLORS.tint.sky }]}>
             <View style={styles.ctaCopy}>
                 <Text style={styles.ctaTitle}>{sent ? 'Need a hand?' : 'Ready to earn?'}</Text>
                 <Text style={styles.ctaText}>
@@ -120,6 +145,7 @@ export default function ErrandsScreen() {
                 </View>
             ) : (
                 <FlatList
+                extraData={themeVersion}
                     data={errands}
                     keyExtractor={(item) => item.id}
                     renderItem={({ item }) => (
@@ -142,7 +168,7 @@ export default function ErrandsScreen() {
     );
 }
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { flex: 1, backgroundColor: COLORS.surface },
     header: { paddingHorizontal: SPACING.lg, paddingTop: SPACING.md, paddingBottom: SPACING.sm },
     title: { ...TYPE.title, color: COLORS.ink },
@@ -193,4 +219,4 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         paddingHorizontal: SPACING.xl,
     },
-});
+}));

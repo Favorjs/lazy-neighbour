@@ -9,7 +9,7 @@
     "scheme": "lazyneighbour",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.lazyneighbour.app",
+      "bundleIdentifier": "com.lazyneighbour.com",
       "config": {
         "googleMapsApiKey": "YOUR_GOOGLE_MAPS_API_KEY"
       }
@@ -19,7 +19,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0F172A"
       },
-      "package": "com.lazyneighbour.app",
+      "package": "com.lazyneighbour.com",
       "config": {
         "googleMaps": {
           "apiKey": "YOUR_GOOGLE_MAPS_API_KEY"

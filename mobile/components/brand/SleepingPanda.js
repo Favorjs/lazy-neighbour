@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, Animated, Easing, StyleSheet } from 'react-native';
 import Svg, { Circle, Ellipse, Path, G } from 'react-native-svg';
-import { COLORS, FONT } from '../../constants/config';
+import { COLORS, FONT, makeStyles } from '../../constants/config';
 
 // A panda is black and white in either appearance
 const PANDA = { white: '#FFFFFF', ink: '#000000', charcoal: '#333333', cheek: '#E8E8E8' };
@@ -125,7 +125,7 @@ export const SleepingPanda = ({ size = 220, compact = false }) => {
     );
 };
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     zone: { position: 'absolute', top: 6, right: 6, width: 80, height: 100 },
     zoneCompact: { top: -4, right: -10, width: 20, height: 26 },
     zed: {
@@ -133,7 +133,7 @@ const styles = StyleSheet.create({
         fontFamily: FONT.extrabold,
         color: COLORS.ink,
     },
-});
+}));
 
 export default SleepingPanda;
 

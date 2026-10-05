@@ -12,8 +12,9 @@ import * as Location from 'expo-location';
 import { Button, IconButton, Icon, Sheet } from '../../components/ui';
 import { Skeleton, ErrandCardSkeleton } from '../../components/ui/Skeleton';
 import { ErrandCard } from '../../components/errand/ErrandCard';
-import { COLORS, CATEGORIES, SPACING, RADIUS, SHADOW, TYPE, IS_DARK } from '../../constants/config';
+import { COLORS, CATEGORIES, SPACING, RADIUS, SHADOW, TYPE, THEME, makeStyles, useThemeVersion } from '../../constants/config';
 import { getSavedLocation, subscribeLocation } from '../../services/locationStore';
+import { errandEvents } from '../../services/errandEvents';
 import api from '../../services/api';
 
 // Only import maps on native platforms
@@ -28,6 +29,7 @@ if (Platform.OS !== 'web') {
 const RADIUS_KM = 5;
 
 export default function RadarScreen() {
+    const themeVersion = useThemeVersion();
     const router = useRouter();
     const mapRef = useRef(null);
     const [location, setLocation] = useState(null);
@@ -35,6 +37,20 @@ export default function RadarScreen() {
     const [loading, setLoading] = useState(true);
     const [selectedErrand, setSelectedErrand] = useState(null);
     const [accepting, setAccepting] = useState(false);
+
+    // A cancelled errand leaves the map immediately
+    useEffect(
+        () =>
+            errandEvents.subscribe((event) => {
+                if (event.type === 'removed') {
+                    setErrands((list) => list.filter((e) => e.id !== event.id));
+                    setSelectedErrand((cur) => (cur?.id === event.id ? null : cur));
+                } else {
+                    getLocationAndErrands();
+                }
+            }),
+        []
+    );
 
     useEffect(() => {
         getLocationAndErrands();
@@ -135,6 +151,7 @@ export default function RadarScreen() {
                     <Text style={styles.muted}>{errands.length} errands within {RADIUS_KM} km</Text>
                 </View>
                 <FlatList
+                extraData={themeVersion}
                     data={errands}
                     keyExtractor={(item) => item.id}
                     contentContainerStyle={{ padding: SPACING.lg }}
@@ -163,7 +180,7 @@ export default function RadarScreen() {
                 style={styles.map}
                 initialRegion={{ ...location, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
                 showsUserLocation
-                userInterfaceStyle={IS_DARK ? 'dark' : 'light'}
+                userInterfaceStyle={THEME.isDark ? 'dark' : 'light'}
                 onPress={() => setSelectedErrand(null)}
             >
                 <Circle
@@ -237,7 +254,7 @@ export default function RadarScreen() {
     );
 }
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { flex: 1, backgroundColor: COLORS.surface },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: SPACING.xl, gap: SPACING.sm },
     muted: { ...TYPE.bodySm, color: COLORS.inkSecondary, textAlign: 'center' },
@@ -305,4 +322,4 @@ const styles = StyleSheet.create({
     },
     sheetEmpty: { paddingBottom: SPACING.md, gap: 4 },
     sheetTitle: { ...TYPE.heading, color: COLORS.ink, textAlign: 'center' },
-});
+}));

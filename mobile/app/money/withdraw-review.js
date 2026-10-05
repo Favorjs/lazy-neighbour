@@ -1,22 +1,25 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Button, Card, Sheet } from '../../components/ui';
 import { StepHeader } from '../../components/ui/StepHeader';
 import { Skeleton } from '../../components/ui/Skeleton';
-import { COLORS, SPACING, RADIUS, SHADOW, TYPE } from '../../constants/config';
+import { COLORS, SPACING, RADIUS, SHADOW, TYPE, makeStyles, useThemeVersion } from '../../constants/config';
 import { formatNaira } from '../../utils/format';
+import { newIdempotencyKey } from '../../utils/singleFlight';
 import api from '../../services/api';
 
 // Withdraw, step 3 of 4: check it and confirm
 export default function WithdrawReview() {
+    const themeVersion = useThemeVersion();
     const router = useRouter();
     const { amount, bankId } = useLocalSearchParams();
     const value = parseFloat(amount) || 0;
     const [bank, setBank] = useState(null);
     const [balance, setBalance] = useState(null);
     const [working, setWorking] = useState(false);
+    const attemptKey = useRef(newIdempotencyKey()).current;
 
     useEffect(() => {
         Promise.all([api.getBankAccounts(), api.getWallet()])
@@ -30,7 +33,7 @@ export default function WithdrawReview() {
     const confirm = async () => {
         setWorking(true);
         try {
-            const res = await api.withdrawFromWallet(value, bankId);
+            const res = await api.withdrawFromWallet(value, bankId, attemptKey);
             router.replace({
                 pathname: '/money/withdraw-done',
                 params: { amount: String(value), balance: String(res.balance), bank: bank?.bankName || '' },
@@ -95,7 +98,7 @@ const Row = ({ label, value, strong }) => (
     </View>
 );
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { flex: 1, backgroundColor: COLORS.surface },
     scroll: { paddingHorizontal: SPACING.lg, paddingTop: SPACING.md, paddingBottom: SPACING.xl },
     hero: { ...TYPE.hero, color: COLORS.ink, marginBottom: SPACING.lg },
@@ -108,4 +111,4 @@ const styles = StyleSheet.create({
     note: { marginTop: SPACING.md, backgroundColor: COLORS.surfaceMuted, borderRadius: RADIUS.tile, padding: SPACING.md },
     noteText: { ...TYPE.caption, color: COLORS.inkSecondary },
     bottom: { padding: SPACING.lg, paddingTop: SPACING.md, backgroundColor: COLORS.surface, ...SHADOW.sheet },
-});
+}));

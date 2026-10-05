@@ -204,3 +204,19 @@ model Notification {
   @@index([userId, isRead, createdAt])
   @@map("notifications")
 }
+
+// Remembers the outcome of a request that carried an Idempotency-Key, so a repeat (double tap,
+// retry after a dropped connection) gets the same answer instead of doing the work twice.
+model IdempotencyKey {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  key       String
+  route     String
+  status    Int?
+  response  Json?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([userId, key])
+  @@index([createdAt])
+  @@map("idempotency_keys")
+}

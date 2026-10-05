@@ -3,7 +3,7 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import * as Location from 'expo-location';
 import { Icon } from '../ui/Icon';
 import { IconButton } from '../ui/Button';
-import { COLORS, SPACING, RADIUS, TYPE } from '../../constants/config';
+import { COLORS, SPACING, RADIUS, TYPE, makeStyles } from '../../constants/config';
 import { getSavedLocation, setSavedLocation, subscribeLocation } from '../../services/locationStore';
 
 const describePlace = (place) => {
@@ -85,7 +85,7 @@ export const HomeTopBar = ({ unreadCount = 0, onBellPress, onLocationPress }) =>
     );
 };
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     bar: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -123,6 +123,6 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     badgeText: { ...TYPE.badge, fontSize: 10, lineHeight: 12, color: COLORS.white },
-});
+}));
 
 export default HomeTopBar;

@@ -12,13 +12,15 @@ import * as ImagePicker from 'expo-image-picker';
 import { Card, Badge, Avatar, Button, IconButton, Icon, Sheet } from '../../components/ui';
 import { StatusTimeline } from '../../components/errand/StatusTimeline';
 import { ErrandDetailSkeleton } from '../../components/ui/Skeleton';
-import { COLORS, CATEGORIES, SPACING, RADIUS, SHADOW, TYPE } from '../../constants/config';
+import { COLORS, CATEGORIES, SPACING, RADIUS, SHADOW, TYPE, makeStyles, useThemeVersion } from '../../constants/config';
 import { formatNaira } from '../../utils/format';
+import { errandEvents } from '../../services/errandEvents';
 import api from '../../services/api';
 
 const money = formatNaira;
 
 export default function ErrandDetailScreen() {
+    const themeVersion = useThemeVersion();
     const router = useRouter();
     const { id } = useLocalSearchParams();
     const [errand, setErrand] = useState(null);
@@ -47,6 +49,7 @@ export default function ErrandDetailScreen() {
         setActionLoading(true);
         try {
             await action();
+            errandEvents.emit({ type: 'changed' });
             onDone?.();
         } catch (error) {
             Sheet.alert('Something went wrong', error.message || 'Please try again');
@@ -93,11 +96,18 @@ export default function ErrandDetailScreen() {
             {
                 text: 'Cancel errand',
                 style: 'destructive',
-                onPress: () =>
-                    run(() => api.cancelErrand(id), () => {
-                        Sheet.alert('Cancelled', 'Your errand has been cancelled.');
-                        router.back();
-                    }),
+                // Optimistic: it disappears from every list and this page closes at once. If the server
+                // refuses, the lists reload and the errand comes back with the reason shown.
+                onPress: () => {
+                    errandEvents.emit({ type: 'removed', id });
+                    router.back();
+                    api.cancelErrand(id)
+                        .then(() => errandEvents.emit({ type: 'changed' }))
+                        .catch((error) => {
+                            errandEvents.emit({ type: 'changed' });
+                            Sheet.alert('Could not cancel', error.message || 'Please try again.');
+                        });
+                },
             },
         ]);
 
@@ -226,7 +236,7 @@ export default function ErrandDetailScreen() {
     );
 }
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { flex: 1, backgroundColor: COLORS.surface },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: SPACING.lg },
     muted: { ...TYPE.body, color: COLORS.inkSecondary },
@@ -274,4 +284,4 @@ const styles = StyleSheet.create({
         backgroundColor: COLORS.surface,
         ...SHADOW.sheet,
     },
-});
+}));

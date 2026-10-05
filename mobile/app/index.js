@@ -2,10 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SleepingPanda } from '../components/brand/SleepingPanda';
-import { COLORS, FONT, TYPE } from '../constants/config';
+import { COLORS, FONT, TYPE, makeStyles, useThemeVersion } from '../constants/config';
 import api from '../services/api';
 
 export default function SplashScreen() {
+    const themeVersion = useThemeVersion();
     const router = useRouter();
     const [fadeAnim] = useState(new Animated.Value(0));
     const [riseAnim] = useState(new Animated.Value(16));
@@ -45,9 +46,9 @@ export default function SplashScreen() {
     );
 }
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.surface },
     words: { alignItems: 'center', marginTop: 20 },
     wordmark: { fontFamily: FONT.extrabold, fontSize: 40, lineHeight: 44, letterSpacing: -1, color: COLORS.ink },
     tagline: { ...TYPE.bodySm, position: 'absolute', bottom: 60, color: COLORS.inkSecondary },
-});
+}));

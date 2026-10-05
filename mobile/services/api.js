@@ -136,10 +136,12 @@ class ApiService {
 
     // ============ ERRANDS ============
 
-    async createErrand(errandData) {
+    // `idempotencyKey`: one fresh key per user action, so a repeat of the same request cannot create it twice
+    async createErrand(errandData, idempotencyKey) {
         return this.request('/errands', {
             method: 'POST',
             body: errandData,
+            headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
         });
     }
 
@@ -221,12 +223,20 @@ class ApiService {
         return this.request('/wallet/transactions');
     }
 
-    async topUpWallet(amount) {
-        return this.request('/wallet/topup', { method: 'POST', body: { amount } });
+    async topUpWallet(amount, idempotencyKey) {
+        return this.request('/wallet/topup', {
+            method: 'POST',
+            body: { amount },
+            headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+        });
     }
 
-    async withdrawFromWallet(amount, bankAccountId) {
-        return this.request('/wallet/withdraw', { method: 'POST', body: { amount, bankAccountId } });
+    async withdrawFromWallet(amount, bankAccountId, idempotencyKey) {
+        return this.request('/wallet/withdraw', {
+            method: 'POST',
+            body: { amount, bankAccountId },
+            headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+        });
     }
 
     async getBankAccounts() {

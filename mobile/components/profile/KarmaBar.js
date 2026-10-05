@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Icon } from '../ui/Icon';
-import { COLORS, RADIUS, TYPE } from '../../constants/config';
+import { COLORS, RADIUS, TYPE, makeStyles } from '../../constants/config';
 
 const calculateLevel = (points) => {
     if (points < 100) return { level: 1, name: 'Newcomer', next: 100, progress: points / 100 };
@@ -37,7 +37,7 @@ export const KarmaBar = ({ karmaPoints = 0, showLabel = true, style }) => {
     );
 };
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { gap: 10 },
     head: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     level: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -53,6 +53,6 @@ const styles = StyleSheet.create({
     points: { ...TYPE.caption, color: COLORS.inkSecondary },
     track: { height: 10, backgroundColor: COLORS.surfacePressed, borderRadius: RADIUS.full, overflow: 'hidden' },
     fill: { height: '100%', backgroundColor: COLORS.ink, borderRadius: RADIUS.full },
-});
+}));
 
 export default KarmaBar;

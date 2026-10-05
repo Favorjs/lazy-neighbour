@@ -11,9 +11,10 @@ import {
     Poppins_800ExtraBold,
 } from '@expo-google-fonts/poppins';
 import { SheetHost } from '../components/ui/Sheet';
-import { COLORS, IS_DARK } from '../constants/config';
+import { COLORS, THEME, useThemeVersion } from '../constants/config';
 
 export default function RootLayout() {
+    const themeVersion = useThemeVersion();
     const [fontsLoaded, fontError] = useFonts({
         Poppins_400Regular,
         Poppins_500Medium,
@@ -27,7 +28,7 @@ export default function RootLayout() {
 
     return (
         <GestureHandlerRootView style={{ flex: 1, backgroundColor: COLORS.surface }}>
-            <StatusBar style={IS_DARK ? 'light' : 'dark'} />
+            <StatusBar style={THEME.isDark ? 'light' : 'dark'} />
             <Stack
                 screenOptions={{
                     headerShown: false,

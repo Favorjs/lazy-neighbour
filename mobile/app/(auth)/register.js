@@ -4,16 +4,16 @@ import {
     Text,
     StyleSheet,
     ScrollView,
-    KeyboardAvoidingView,
     Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Button, Input, IconButton, Sheet } from '../../components/ui';
-import { COLORS, SPACING, TYPE } from '../../constants/config';
+import { Button, Input, IconButton, Sheet, KeyboardAware } from '../../components/ui';
+import { COLORS, SPACING, TYPE, makeStyles, useThemeVersion } from '../../constants/config';
 import api from '../../services/api';
 
 export default function RegisterScreen() {
+    const themeVersion = useThemeVersion();
     const router = useRouter();
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
@@ -53,10 +53,7 @@ export default function RegisterScreen() {
 
     return (
         <SafeAreaView style={styles.container}>
-            <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                style={{ flex: 1 }}
-            >
+            <KeyboardAware lift style={{ flex: 1 }}>
                 <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
                     <IconButton icon="ChevronLeft" label="Back" onPress={() => router.back()} />
 
@@ -122,12 +119,12 @@ export default function RegisterScreen() {
                         <Button title="Sign in" variant="ghost" onPress={() => router.replace('/(auth)/login')} />
                     </View>
                 </View>
-            </KeyboardAvoidingView>
+            </KeyboardAware>
         </SafeAreaView>
     );
 }
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { flex: 1, backgroundColor: COLORS.surface },
     scrollContent: { padding: SPACING.lg, paddingBottom: SPACING.md },
     header: { marginTop: SPACING.lg, marginBottom: SPACING.lg, gap: 8 },
@@ -137,4 +134,4 @@ const styles = StyleSheet.create({
     bottom: { padding: SPACING.lg, gap: SPACING.md },
     switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
     switchText: { ...TYPE.bodySm, color: COLORS.inkSecondary },
-});
+}));

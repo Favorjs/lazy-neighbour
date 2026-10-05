@@ -5,12 +5,13 @@ import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Button, Icon } from '../../components/ui';
 import { StepHeader } from '../../components/ui/StepHeader';
 import { Skeleton } from '../../components/ui/Skeleton';
-import { COLORS, SPACING, RADIUS, SHADOW, TYPE } from '../../constants/config';
+import { COLORS, SPACING, RADIUS, SHADOW, TYPE, makeStyles, useThemeVersion } from '../../constants/config';
 import { formatNaira } from '../../utils/format';
 import api from '../../services/api';
 
 // Withdraw, step 2 of 4: where should it go?
 export default function WithdrawBank() {
+    const themeVersion = useThemeVersion();
     const router = useRouter();
     const { amount } = useLocalSearchParams();
     const [accounts, setAccounts] = useState(null);
@@ -87,7 +88,7 @@ export default function WithdrawBank() {
     );
 }
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { flex: 1, backgroundColor: COLORS.surface },
     scroll: { paddingHorizontal: SPACING.lg, paddingTop: SPACING.md, paddingBottom: SPACING.xl, gap: SPACING.sm },
     hero: { ...TYPE.hero, fontSize: 30, lineHeight: 38, color: COLORS.ink, marginBottom: SPACING.md },
@@ -115,4 +116,4 @@ const styles = StyleSheet.create({
     emptyTitle: { ...TYPE.heading, color: COLORS.ink },
     emptyText: { ...TYPE.bodySm, color: COLORS.inkSecondary, textAlign: 'center' },
     bottom: { padding: SPACING.lg, paddingTop: SPACING.md, backgroundColor: COLORS.surface, ...SHADOW.sheet },
-});
+}));

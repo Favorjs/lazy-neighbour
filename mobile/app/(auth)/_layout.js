@@ -1,8 +1,9 @@
 import React from 'react';
 import { Stack } from 'expo-router';
-import { COLORS } from '../../constants/config';
+import { COLORS, useThemeVersion } from '../../constants/config';
 
 export default function AuthLayout() {
+    const themeVersion = useThemeVersion();
     return (
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: COLORS.surface } }}>
             <Stack.Screen name="login" />

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Animated, Easing, StyleSheet } from 'react-native';
-import { COLORS, RADIUS, SHADOW, SPACING } from '../../constants/config';
+import { COLORS, RADIUS, SHADOW, SPACING, makeStyles } from '../../constants/config';
 
 // One shared pulse so every block on a screen breathes in sync
 const useShimmer = () => {
@@ -92,14 +92,13 @@ export const ErrandListSkeleton = ({ count = 3, variant = 'default' }) => (
 );
 
 export const HomeHeaderSkeleton = () => (
-    <View style={{ gap: 12, paddingTop: SPACING.md }}>
-        <Skeleton width={120} height={22} />
-        <Skeleton width="80%" height={40} radius={10} />
-        <Skeleton width="65%" height={14} />
-        <View style={{ gap: 12, marginTop: SPACING.sm }}>
-            <Skeleton height={56} radius={RADIUS.full} />
-            <Skeleton height={56} radius={RADIUS.full} />
+    <View style={{ gap: 12, paddingTop: SPACING.sm }}>
+        <View style={styles.between}>
+            <Skeleton width={170} height={46} radius={RADIUS.full} />
+            <SkeletonCircle size={48} />
         </View>
+        <Skeleton height={206} radius={RADIUS.card} style={{ marginTop: SPACING.xs }} />
+        <Skeleton height={56} radius={RADIUS.full} />
         <View style={[styles.row, { marginTop: SPACING.md }]}>
             {[56, 96, 84, 104].map((w, i) => (
                 <Skeleton key={i} width={w} height={34} radius={RADIUS.full} />
@@ -184,7 +183,7 @@ export const WalletSkeleton = () => (
     </View>
 );
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     card: {
         backgroundColor: COLORS.surface,
         borderRadius: RADIUS.card,
@@ -195,6 +194,6 @@ const styles = StyleSheet.create({
     },
     row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     between: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-});
+}));
 
 export default Skeleton;

@@ -1,19 +1,21 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
     View,
     Text,
     StyleSheet,
     ScrollView,
-    KeyboardAvoidingView,
     Platform,
     Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import * as Location from 'expo-location';
-import { Button, Input, Card, IconButton, Icon, Sheet } from '../components/ui';
+import { Button, Input, Card, IconButton, Icon, Sheet, KeyboardAware } from '../components/ui';
 import { CategoryPicker } from '../components/errand/CategoryPicker';
-import { COLORS, SPACING, RADIUS, SHADOW, TYPE, MIN_BOUNTY } from '../constants/config';
+import { ErrandSent } from '../components/errand/ErrandSent';
+import { LoadingOverlay } from '../components/ui/LoadingOverlay';
+import { newIdempotencyKey } from '../utils/singleFlight';
+import { COLORS, SPACING, RADIUS, SHADOW, TYPE, MIN_BOUNTY, makeStyles, useThemeVersion } from '../constants/config';
 import { formatNaira, CURRENCY_SYMBOL } from '../utils/format';
 import { getSavedLocation } from '../services/locationStore';
 import api from '../services/api';
@@ -21,6 +23,7 @@ import api from '../services/api';
 const FEE_PERCENT = 10;
 
 export default function PostErrandScreen() {
+    const themeVersion = useThemeVersion();
     const router = useRouter();
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
@@ -32,6 +35,10 @@ export default function PostErrandScreen() {
         return saved ? { lat: saved.latitude, lng: saved.longitude } : null;
     });
     const [loading, setLoading] = useState(false);
+    const [sent, setSent] = useState(null); // the errand, once it has been created
+    // One key for this submission. If the request is repeated (double tap, retry after a dropped
+    // connection) the server returns the same errand instead of creating a second one.
+    const attemptKey = useRef(newIdempotencyKey());
     const [gettingLocation, setGettingLocation] = useState(false);
     const [walletBalance, setWalletBalance] = useState(null);
 
@@ -73,6 +80,7 @@ export default function PostErrandScreen() {
     };
 
     const handleSubmit = async () => {
+        if (loading || sent) return;
         if (!title.trim()) return Sheet.alert('One more thing', 'Tell us what you need done.');
         if (!description.trim()) return Sheet.alert('One more thing', 'Add a few details for your runner.');
         if (!bounty || parseFloat(bounty) < MIN_BOUNTY) return Sheet.alert('One more thing', `The bounty must be at least ${formatNaira(MIN_BOUNTY)}.`);
@@ -80,19 +88,25 @@ export default function PostErrandScreen() {
 
         setLoading(true);
         try {
-            await api.createErrand({
-                title: title.trim(),
-                description: description.trim(),
-                category,
-                bountyAmount: parseFloat(bounty),
-                locationLat: location.lat,
-                locationLng: location.lng,
-                address,
-            });
-
-            Sheet.alert('Errand sent', 'Runners nearby can see it now.', [
-                { text: 'Nice', onPress: () => router.back() },
+            // Keep the panda on screen for a moment even when the server answers instantly
+            const minimumWait = new Promise((resolve) => setTimeout(resolve, 1200));
+            const [res] = await Promise.all([
+                api.createErrand(
+                    {
+                        title: title.trim(),
+                        description: description.trim(),
+                        category,
+                        bountyAmount: parseFloat(bounty),
+                        locationLat: location.lat,
+                        locationLng: location.lng,
+                        address,
+                    },
+                    attemptKey.current
+                ),
+                minimumWait,
             ]);
+
+            setSent(res.errand);
         } catch (error) {
             if (error.code === 'INSUFFICIENT_FUNDS') {
                 Sheet.alert('Top up your wallet', error.message, [
@@ -113,14 +127,27 @@ export default function PostErrandScreen() {
     const total = amount + serviceFee;
     const short = walletBalance !== null && total > walletBalance;
 
+    if (sent) {
+        return (
+            <ErrandSent
+                errand={sent}
+                total={Number(sent.bountyAmount) + Number(sent.serviceFee)}
+                onView={() => router.replace(`/errand/${sent.id}`)}
+                onDone={() => router.back()}
+            />
+        );
+    }
+
     return (
-        <SafeAreaView style={styles.container}>
-            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+        <View style={styles.container}>
+        <SafeAreaView style={{ flex: 1 }}>
+            <KeyboardAware style={{ flex: 1 }}>
                 <View style={styles.header}>
                     <IconButton icon="X" label="Close" onPress={() => router.back()} />
                 </View>
 
-                <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+                <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled"
+                    automaticallyAdjustKeyboardInsets>
                     <Text style={styles.title}>What do you need done?</Text>
 
                     <Input
@@ -198,12 +225,16 @@ export default function PostErrandScreen() {
                 <View style={styles.bottom}>
                     <Button title="Send errand" variant="primary" block bubbleIcon="Send" disabled={!filled} loading={loading} onPress={handleSubmit} />
                 </View>
-            </KeyboardAvoidingView>
+            </KeyboardAware>
         </SafeAreaView>
+
+        {/* The sleeping panda covers the screen while the errand is being sent */}
+        <LoadingOverlay visible={loading} title="Sending your errand" subtitle="Finding runners near you..." />
+        </View>
     );
 }
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { flex: 1, backgroundColor: COLORS.surface },
     header: { paddingHorizontal: SPACING.lg, paddingVertical: SPACING.sm, flexDirection: 'row' },
     scroll: { paddingHorizontal: SPACING.lg, paddingBottom: SPACING.xl },
@@ -244,4 +275,4 @@ const styles = StyleSheet.create({
     totalLabel: { ...TYPE.cardTitle, color: COLORS.ink },
     totalValue: { ...TYPE.amount, color: COLORS.ink },
     bottom: { padding: SPACING.lg, paddingTop: SPACING.md, backgroundColor: COLORS.surface, ...SHADOW.sheet },
-});
+}));

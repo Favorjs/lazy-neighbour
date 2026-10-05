@@ -6,18 +6,18 @@ import {
     FlatList,
     TextInput,
     Pressable,
-    KeyboardAvoidingView,
     Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Avatar, IconButton, Icon, Sheet } from '../../components/ui';
+import { Avatar, IconButton, Icon, Sheet, KeyboardAware } from '../../components/ui';
 import { ChatSkeleton } from '../../components/ui/Skeleton';
 import { PandaSpinner } from '../../components/brand/SleepingPanda';
-import { COLORS, SPACING, RADIUS, TYPE } from '../../constants/config';
+import { COLORS, SPACING, RADIUS, TYPE, makeStyles, useThemeVersion } from '../../constants/config';
 import api from '../../services/api';
 
 export default function ChatScreen() {
+    const themeVersion = useThemeVersion();
     const router = useRouter();
     const { errandId } = useLocalSearchParams();
     const flatListRef = useRef(null);
@@ -139,6 +139,7 @@ export default function ChatScreen() {
             </View>
 
             <FlatList
+                extraData={themeVersion}
                 ref={flatListRef}
                 data={messages}
                 keyExtractor={(item) => item.id}
@@ -156,10 +157,7 @@ export default function ChatScreen() {
                 }
             />
 
-            <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-                keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-            >
+            <KeyboardAware lift>
                 {chatOpen ? (
                 <View style={styles.inputBar}>
                     <TextInput
@@ -193,12 +191,12 @@ export default function ChatScreen() {
                         </Text>
                     </View>
                 )}
-            </KeyboardAvoidingView>
+            </KeyboardAware>
         </SafeAreaView>
     );
 }
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { flex: 1, backgroundColor: COLORS.surface },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     header: {
@@ -270,4 +268,4 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     sendOff: { backgroundColor: COLORS.surfaceMuted },
-});
+}));

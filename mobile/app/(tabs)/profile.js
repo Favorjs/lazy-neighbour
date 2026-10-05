@@ -11,7 +11,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { Card, Avatar, Icon } from '../../components/ui';
 import { ProfileSkeleton } from '../../components/ui/Skeleton';
 import { KarmaBar } from '../../components/profile/KarmaBar';
-import { COLORS, SPACING, RADIUS, TYPE } from '../../constants/config';
+import { COLORS, SPACING, RADIUS, TYPE, makeStyles, useThemeVersion } from '../../constants/config';
 import { formatNaira } from '../../utils/format';
 import api from '../../services/api';
 
@@ -24,6 +24,7 @@ const MENU = [
 ];
 
 export default function ProfileScreen() {
+    const themeVersion = useThemeVersion();
     const router = useRouter();
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -77,15 +78,15 @@ export default function ProfileScreen() {
                 </Card>
 
                 <View style={styles.stats}>
-                    <View style={styles.stat}>
+                    <View style={[styles.stat, { backgroundColor: COLORS.tint.lilac }]}>
                         <Text style={styles.statValue}>{user.stats?.errandsRequested || 0}</Text>
                         <Text style={styles.statLabel}>Sent</Text>
                     </View>
-                    <View style={styles.stat}>
+                    <View style={[styles.stat, { backgroundColor: COLORS.tint.mint }]}>
                         <Text style={styles.statValue}>{user.stats?.errandsCompleted || 0}</Text>
                         <Text style={styles.statLabel}>Run</Text>
                     </View>
-                    <View style={styles.stat}>
+                    <View style={[styles.stat, { backgroundColor: COLORS.tint.yellow }]}>
                         <Text style={styles.statValue}>{formatNaira(user.totalEarnings || 0)}</Text>
                         <Text style={styles.statLabel}>Earned</Text>
                     </View>
@@ -120,7 +121,7 @@ export default function ProfileScreen() {
     );
 }
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { flex: 1, backgroundColor: COLORS.surface },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     scroll: { paddingHorizontal: SPACING.lg, paddingBottom: SPACING.xl },
@@ -162,4 +163,4 @@ const styles = StyleSheet.create({
     menuValue: { ...TYPE.cardTitle, color: COLORS.ink },
     menuText: { ...TYPE.cardTitle, fontFamily: TYPE.label.fontFamily, color: COLORS.ink, flex: 1 },
     version: { ...TYPE.caption, color: COLORS.inkSecondary, textAlign: 'center', marginTop: SPACING.lg },
-});
+}));

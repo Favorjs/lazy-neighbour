@@ -7,7 +7,7 @@ import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 import * as Haptics from 'expo-haptics';
 import { Pressable } from 'react-native';
 import { Fab, Icon } from '../../components/ui';
-import { COLORS, SHADOW, TYPE } from '../../constants/config';
+import { COLORS, SHADOW, TYPE, makeStyles, useThemeVersion } from '../../constants/config';
 
 // ---------------------------------------------------------------------------
 // iOS: native tab bar. On iOS 26 the system draws it as floating liquid glass;
@@ -124,10 +124,11 @@ function DefaultTabs() {
 }
 
 export default function TabLayout() {
+    const themeVersion = useThemeVersion();
     return Platform.OS === 'ios' ? <IosTabs /> : <DefaultTabs />;
 }
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     floating: { position: 'absolute', right: 20 },
     glassFab: {
         width: 62,
@@ -148,4 +149,4 @@ const styles = StyleSheet.create({
     label: { ...TYPE.caption, fontSize: 11, color: COLORS.grey },
     labelFocused: { color: COLORS.ink, fontFamily: TYPE.badge.fontFamily },
     fabSlot: { flex: 1, alignItems: 'center', justifyContent: 'center', top: -18 },
-});
+}));

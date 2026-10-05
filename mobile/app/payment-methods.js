@@ -4,11 +4,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Button, Icon, ScreenHeader, Sheet } from '../components/ui';
 import { Skeleton } from '../components/ui/Skeleton';
-import { COLORS, SPACING, RADIUS, TYPE } from '../constants/config';
+import { COLORS, SPACING, RADIUS, TYPE, makeStyles, useThemeVersion } from '../constants/config';
 import { formatNaira } from '../utils/format';
 import api from '../services/api';
 
 export default function PaymentMethodsScreen() {
+    const themeVersion = useThemeVersion();
     const router = useRouter();
     const [balance, setBalance] = useState(0);
     const [accounts, setAccounts] = useState([]);
@@ -148,7 +149,7 @@ export default function PaymentMethodsScreen() {
     );
 }
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { flex: 1, backgroundColor: COLORS.surface },
     scroll: { paddingHorizontal: SPACING.lg, paddingBottom: SPACING.xxl },
     section: { ...TYPE.heading, color: COLORS.ink, marginTop: SPACING.md, marginBottom: SPACING.sm + 2 },
@@ -186,4 +187,4 @@ const styles = StyleSheet.create({
     },
     emptyTitle: { ...TYPE.heading, color: COLORS.ink },
     emptyText: { ...TYPE.bodySm, color: COLORS.inkSecondary, textAlign: 'center', paddingHorizontal: SPACING.lg },
-});
+}));

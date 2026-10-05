@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, Animated, StyleSheet } from 'react-native';
 import { Icon } from '../ui/Icon';
-import { COLORS, RADIUS, SPACING, TYPE } from '../../constants/config';
+import { COLORS, RADIUS, SPACING, TYPE, makeStyles } from '../../constants/config';
 
 const time = (d) =>
     d ? new Date(d).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null;
@@ -107,7 +107,7 @@ export const StatusTimeline = ({ errand, isRequester }) => {
     );
 };
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     wrap: { paddingTop: 4 },
     step: { flexDirection: 'row', gap: 14, minHeight: 64 },
     rail: { width: 40, alignItems: 'center' },
@@ -150,6 +150,6 @@ const styles = StyleSheet.create({
         marginTop: SPACING.sm,
     },
     alertText: { ...TYPE.bodySm, color: COLORS.clay, flex: 1 },
-});
+}));
 
 export default StatusTimeline;

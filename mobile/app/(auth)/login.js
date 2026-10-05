@@ -4,16 +4,16 @@ import {
     Text,
     StyleSheet,
     ScrollView,
-    KeyboardAvoidingView,
     Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Button, Input, Sheet } from '../../components/ui';
-import { COLORS, SPACING, TYPE, FONT } from '../../constants/config';
+import { Button, Input, Sheet, KeyboardAware } from '../../components/ui';
+import { COLORS, SPACING, TYPE, FONT, makeStyles, useThemeVersion } from '../../constants/config';
 import api from '../../services/api';
 
 export default function LoginScreen() {
+    const themeVersion = useThemeVersion();
     const router = useRouter();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -46,10 +46,7 @@ export default function LoginScreen() {
 
     return (
         <SafeAreaView style={styles.container}>
-            <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                style={{ flex: 1 }}
-            >
+            <KeyboardAware lift style={{ flex: 1 }}>
                 <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
                     <Text style={styles.brand}>Lazy Neighbour</Text>
 
@@ -91,12 +88,12 @@ export default function LoginScreen() {
                         <Button title="Create an account" variant="ghost" onPress={() => router.push('/(auth)/register')} />
                     </View>
                 </View>
-            </KeyboardAvoidingView>
+            </KeyboardAware>
         </SafeAreaView>
     );
 }
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { flex: 1, backgroundColor: COLORS.surface },
     scrollContent: { flexGrow: 1, padding: SPACING.lg, paddingTop: SPACING.xl },
     brand: { fontFamily: FONT.bold, fontSize: 18, color: COLORS.ink },
@@ -107,4 +104,4 @@ const styles = StyleSheet.create({
     bottom: { padding: SPACING.lg, gap: SPACING.md },
     switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
     switchText: { ...TYPE.bodySm, color: COLORS.inkSecondary },
-});
+}));

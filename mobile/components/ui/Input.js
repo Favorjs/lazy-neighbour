@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, TextInput as RNTextInput, Text, StyleSheet, Pressable } from 'react-native';
 import { Icon } from './Icon';
-import { COLORS, RADIUS, SPACING, TYPE } from '../../constants/config';
+import { COLORS, RADIUS, SPACING, TYPE, makeStyles } from '../../constants/config';
 
 // Filled field: grey at rest, white with a 2px black ring when focused, clay with an error.
 // leftIcon / rightIcon are Lucide names.
@@ -79,7 +79,7 @@ export const Input = ({
     );
 };
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { marginBottom: SPACING.md },
     label: { ...TYPE.label, color: COLORS.ink, marginBottom: 6 },
     box: {
@@ -97,6 +97,6 @@ const styles = StyleSheet.create({
     input: { flex: 1, ...TYPE.body, color: COLORS.ink, paddingVertical: 14, minWidth: 0 },
     errorRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
     errorText: { ...TYPE.caption, color: COLORS.clay },
-});
+}));
 
 export default Input;

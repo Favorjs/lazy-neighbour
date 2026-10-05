@@ -3,7 +3,7 @@ import { View, Text, ScrollView, Pressable, Linking, StyleSheet } from 'react-na
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Button, Input, Icon, ScreenHeader, Sheet } from '../components/ui';
-import { COLORS, SPACING, RADIUS, TYPE, SUPPORT_EMAIL } from '../constants/config';
+import { COLORS, SPACING, RADIUS, TYPE, SUPPORT_EMAIL, makeStyles, useThemeVersion } from '../constants/config';
 
 // Plain-language answers, grouped by what people are trying to do
 const FAQ = [
@@ -100,6 +100,7 @@ const FAQ = [
 ];
 
 export default function HelpScreen() {
+    const themeVersion = useThemeVersion();
     const router = useRouter();
     const [query, setQuery] = useState('');
     const [open, setOpen] = useState(null);
@@ -139,15 +140,15 @@ export default function HelpScreen() {
                 {/* Quick links */}
                 {!query ? (
                     <View style={styles.quick}>
-                        <Pressable style={styles.quickCard} onPress={() => router.push('/wallet')}>
+                        <Pressable style={[styles.quickCard, { backgroundColor: COLORS.tint.mint }]} onPress={() => router.push('/wallet')}>
                             <Icon name="Wallet" size={22} />
                             <Text style={styles.quickText}>My wallet</Text>
                         </Pressable>
-                        <Pressable style={styles.quickCard} onPress={() => router.push('/(tabs)/errands')}>
+                        <Pressable style={[styles.quickCard, { backgroundColor: COLORS.tint.sky }]} onPress={() => router.push('/(tabs)/errands')}>
                             <Icon name="ListChecks" size={22} />
                             <Text style={styles.quickText}>My errands</Text>
                         </Pressable>
-                        <Pressable style={styles.quickCard} onPress={() => router.push('/settings')}>
+                        <Pressable style={[styles.quickCard, { backgroundColor: COLORS.tint.lilac }]} onPress={() => router.push('/settings')}>
                             <Icon name="Lock" size={22} />
                             <Text style={styles.quickText}>Account</Text>
                         </Pressable>
@@ -202,7 +203,7 @@ export default function HelpScreen() {
     );
 }
 
-const styles = StyleSheet.create({
+const styles = makeStyles(() => ({
     container: { flex: 1, backgroundColor: COLORS.surface },
     scroll: { paddingHorizontal: SPACING.lg, paddingBottom: SPACING.xxl },
     hero: { ...TYPE.hero, color: COLORS.ink, marginTop: SPACING.sm },
@@ -243,4 +244,4 @@ const styles = StyleSheet.create({
     },
     contactTitle: { ...TYPE.title, color: COLORS.ink },
     contactText: { ...TYPE.bodySm, color: COLORS.inkSecondary, marginTop: 4 },
-});
+}));
